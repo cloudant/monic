@@ -1,0 +1,12 @@
+{application, monic,
+ [
+  {description, "Contiguous attachment storage system"},
+  {vsn, git},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { monic_app, []}},
+  {env, []}
+ ]}.
