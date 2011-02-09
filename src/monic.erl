@@ -18,7 +18,7 @@ start_link(Name) ->
     start_link(Name, []).
 
 start_link(Name, Options) ->
-    gen_server:start_link(?MODULE, [Name, Options], []).
+    gen_server:start_link({local, list_to_atom(Name)}, ?MODULE, [Name, Options], []).
 
 close(Pid) ->
     gen_server:call(Pid, close, infinity).
@@ -48,7 +48,7 @@ handle_cast({done, Worker, From, Resp}, #state{requests=[]}=State) ->
     Busy = [B || B <- State#state.busy, B /= Worker],
     Idle = [Worker | State#state.idle],
     gen_server:reply(From, Resp),
-    {noreply, State#state{idle=Idle, busy=Busy}};
+    {noreply, State#state{idle=lists:reverse(Idle), busy=Busy}};
 handle_cast({done, Worker, From, Resp}, #state{requests=[R|Rest]}=State) ->
     gen_server:reply(From, Resp),
     monic_worker:start_work(Worker, R),

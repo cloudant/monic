@@ -21,7 +21,7 @@
 % public functions
 
 start_link(Master, Path) ->
-    gen_server:start_link(?MODULE, {Master, Path}, []).
+    gen_server:start_link({local, list_to_atom(Path)}, ?MODULE, {Master, Path}, []).
 
 start_work(Pid, Request) ->
     gen_server:cast(Pid, Request).
