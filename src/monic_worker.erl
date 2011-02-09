@@ -47,7 +47,8 @@ handle_cast({{write, Bin}, From}, #state{master=Master,fd=Fd}=State) ->
            end,
     gen_server:cast(Master, {done, self(), From, Resp}),
     {noreply, State};
-handle_cast(_Msg, State) ->
+handle_cast({Req, From}, #state{master=Master}=State) ->
+    gen_server:cast(Master, {done, self(), From, {error, Req}}),
     {noreply, State}.
 
 handle_info(_Info, State) ->
