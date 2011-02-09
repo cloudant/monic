@@ -48,7 +48,7 @@ handle_call(close, _From, #state{fd=Fd}=State) ->
 handle_cast({{read, #handle{name=Name, position=Position}}, From},
             #state{name=Name, master=Master, fd=Fd}=State) ->
     {ok, <<Size:64/integer>>} = file:pread(Fd, Position, 8),
-    {ok, Bin} = file:pread(Fd, Position+8, Size),
+    {ok, Bin} = file:pread(Fd, Position + 8, Size),
     gen_server:cast(Master, {done, self(), From, {ok, Bin}}),
     {noreply, State};
 handle_cast({{write, Bin}, From},
