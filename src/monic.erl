@@ -46,9 +46,9 @@ handle_call(Request, From, #state{idle=[]}=State) ->
 
 handle_cast({done, Worker, From, Resp}, #state{requests=[]}=State) ->
     Busy = [B || B <- State#state.busy, B /= Worker],
-    Idle = [Worker | State#state.idle],
+    Idle = State#state.idle ++ [Worker],
     gen_server:reply(From, Resp),
-    {noreply, State#state{idle=lists:reverse(Idle), busy=Busy}};
+    {noreply, State#state{idle=Idle, busy=Busy}};
 handle_cast({done, Worker, From, Resp}, #state{requests=[R|Rest]}=State) ->
     gen_server:reply(From, Resp),
     monic_worker:start_work(Worker, R),
