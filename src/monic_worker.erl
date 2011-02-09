@@ -45,13 +45,20 @@ handle_call(close, _From, #state{fd=nil}=State) ->
 handle_call(close, _From, #state{fd=Fd}=State) ->
     {reply, file:close(Fd), State#state{fd=nil}}.
 
-handle_cast({{write, Bin}, From}, #state{name=Name,master=Master,fd=Fd}=State) ->
+handle_cast({{read, #handle{name=Name, position=Position}}, From},
+            #state{name=Name, master=Master, fd=Fd}=State) ->
+    {ok, <<Size:64/integer>>} = file:pread(Fd, Position, 8),
+    {ok, Bin} = file:pread(Fd, Position+8, Size),
+    gen_server:cast(Master, {done, self(), From, {ok, Bin}}),
+    {noreply, State};
+handle_cast({{write, Bin}, From},
+            #state{name=Name, master=Master, fd=Fd}=State) ->
+    Size = byte_size(Bin),
     {ok, Position} = file:position(Fd, cur),
-    Resp = case file:write(Fd, Bin) of
-               ok -> {ok, #handle{name=Name,position=Position}};
-               Error -> Error
-           end,
-    gen_server:cast(Master, {done, self(), From, Resp}),
+    ok = file:write(Fd, <<Size:64/integer>>),
+    ok = file:write(Fd, Bin),
+    Handle = #handle{name=Name, position=Position},
+    gen_server:cast(Master, {done, self(), From, {ok, Handle}}),
     {noreply, State};
 handle_cast({Req, From}, #state{master=Master}=State) ->
     gen_server:cast(Master, {done, self(), From, {error, Req}}),

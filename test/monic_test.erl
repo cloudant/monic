@@ -19,6 +19,6 @@ open_close_test() ->
     {ok, Pid} = monic:start_link("foo", [{max, 5}]),
     Bin = <<"hello this is a quick test">>,
     {ok, Handle} = monic:write(Pid, Bin),
-    %{ok, Bin1} = monic:read(Pid, Handle),
-    %?assertEqual(Bin, Bin1),
+    {ok, Bin1} = monic:read(Pid, Handle),
+    ?assertEqual(Bin, Bin1),
     ok = monic:close(Pid).
