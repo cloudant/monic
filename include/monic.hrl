@@ -1,0 +1,4 @@
+-record(handle, {
+          path,
+          position
+         }).

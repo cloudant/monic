@@ -1,5 +1,6 @@
 -module(monic).
 -behavior(gen_server).
+-include("monic.hrl").
 
 % public API
 -export([start_link/1, start_link/2, close/1, write/2, read/2]).
@@ -35,23 +36,34 @@ init([Name, Options]) ->
     State = init_workers(Name, Options),
     {ok, State}.
 
+handle_call({read, #handle{path=Path}}=Request, From, #state{idle=Idle}=State)->
+    case lists:partition(fun({Path1, _}) -> Path1 == Path end, Idle) of
+        {[], _} ->
+            {noreply, State#state{requests=[{Request, From} | State#state.requests]}};
+        {[W], Rest} ->
+            monic_worker:start_work(W, {Request, From}),
+            {noreply, State#state{idle=Rest,busy=[W|State#state.busy]}}
+    end;
+handle_call({write, _Bin}=Request, From, #state{idle=Idle}=State) ->
+    case Idle of
+        [] ->
+            {noreply, State#state{requests=[{Request, From} | State#state.requests]}};
+        [W|Rest] ->
+            monic_worker:start_work(W, {Request, From}),
+            {noreply, State#state{idle=Rest,busy=[W|State#state.busy]}}
+    end;
 handle_call(close, _From, State) ->
     shutdown_workers(State),
-    {stop, normal, ok, State};
-handle_call(Request, From, #state{idle=[W|Rest]}=State) ->
-    monic_worker:start_work(W, {Request, From}),
-    {noreply, State#state{idle=Rest,busy=[W | State#state.busy]}};
-handle_call(Request, From, #state{idle=[]}=State) ->
-    {noreply, State#state{requests=[{Request, From} | State#state.requests]}}.
+    {stop, normal, ok, State}.
 
 handle_cast({done, Worker, From, Resp}, #state{requests=[]}=State) ->
     Busy = [B || B <- State#state.busy, B /= Worker],
     Idle = State#state.idle ++ [Worker],
     gen_server:reply(From, Resp),
     {noreply, State#state{idle=Idle, busy=Busy}};
-handle_cast({done, Worker, From, Resp}, #state{requests=[R|Rest]}=State) ->
+handle_cast({done, {_, Pid}, From, Resp}, #state{requests=[R|Rest]}=State) ->
     gen_server:reply(From, Resp),
-    monic_worker:start_work(Worker, R),
+    monic_worker:start_work(Pid, R),
     {noreply, State#state{requests=Rest}}.
 
 handle_info(_Info, State) ->
