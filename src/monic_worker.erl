@@ -8,8 +8,14 @@
 -export([init/1, terminate/2, code_change/3,handle_call/3, handle_cast/2, handle_info/2]).
 
 -record(state, {
+          name,
           master=nil,
           fd = nil
+         }).
+
+-record(handle, {
+          name,
+          position
          }).
 
 % public functions
@@ -29,7 +35,7 @@ init({Master, Path}) ->
     filelib:ensure_dir(Path),
     case file:open(Path, [read, write, raw, binary]) of
         {ok, Fd} ->
-            {ok, #state{master=Master,fd=Fd}};
+            {ok, #state{name=filename:basename(Path),master=Master,fd=Fd}};
         Error ->
             Error
     end.
@@ -39,10 +45,10 @@ handle_call(close, _From, #state{fd=nil}=State) ->
 handle_call(close, _From, #state{fd=Fd}=State) ->
     {reply, file:close(Fd), State#state{fd=nil}}.
 
-handle_cast({{write, Bin}, From}, #state{master=Master,fd=Fd}=State) ->
-    Position = file:position(Fd, cur),
+handle_cast({{write, Bin}, From}, #state{name=Name,master=Master,fd=Fd}=State) ->
+    {ok, Position} = file:position(Fd, cur),
     Resp = case file:write(Fd, Bin) of
-               ok -> Position;
+               ok -> {ok, #handle{name=Name,position=Position}};
                Error -> Error
            end,
     gen_server:cast(Master, {done, self(), From, Resp}),
