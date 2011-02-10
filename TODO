@@ -1,0 +1,16 @@
+* streaming
+* checksums
+* cookies
+* reader concurrency
+* preallocation
+* deletion
+* compaction
+
+
+
+write(Name, Fun)
+
+Fun produces;
+{ok, Bin}
+eof
+{error, Reason}
