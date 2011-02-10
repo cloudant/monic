@@ -15,7 +15,7 @@
 -module(monic_test).
 -include_lib("eunit/include/eunit.hrl").
 
-open_close_test() ->
+basic_test() ->
     {ok, Pid} = monic:start_link("foo", [{max, 5}]),
     Bin = <<"hello this is a quick test">>,
     {ok, Handle} = monic:write(Pid, Bin),
