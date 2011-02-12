@@ -80,10 +80,11 @@ code_change(_OldVsn, State, _Extra) ->
 
 init_workers(Name, Options) ->
     Max = get_value(max, Options, 1),
-    Workers = lists:map(fun(N) ->
-                                Path = filename:join(Name, integer_to_list(N)),
-                                {ok, Worker} = monic_worker:start_link(self(), Path),
-                                Worker end, lists:seq(1, Max)),
+    Workers = [begin
+                   Path = filename:join(Name, integer_to_list(N)),
+                   {ok, Worker} = monic_worker:start_link(self(), Path),
+                   Worker
+               end || N <- lists:seq(1, Max)],
     #state{idle=Workers}.
 
 shutdown_workers(#state{busy=Busy,idle=Idle}) ->
