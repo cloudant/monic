@@ -42,7 +42,7 @@ handle_call(close, _From, #state{fd=nil}=State) ->
 handle_call(close, _From, #state{fd=Fd}=State) ->
     {reply, file:close(Fd), State#state{fd=nil}}.
 
-handle_cast({{read, #handle{path=Path, position=Position}}, From},
+handle_cast({{read, #handle{location=Position}}, From},
             #state{path=Path, master=Master, fd=Fd}=State) ->
     {ok, <<Size:64/integer>>} = file:pread(Fd, Position, 8),
     {ok, Bin} = file:pread(Fd, Position + 8, Size),
@@ -54,7 +54,7 @@ handle_cast({{write, Bin}, From},
     {ok, Position} = file:position(Fd, cur),
     ok = file:write(Fd, <<Size:64/integer>>),
     ok = file:write(Fd, Bin),
-    Handle = #handle{path=Path, position=Position},
+    Handle = #handle{cookie=Path, location=Position},
     gen_server:cast(Master, {done, {Path, self()}, From, {ok, Handle}}),
     {noreply, State};
 handle_cast({Req, From}, #state{path=Path, master=Master}=State) ->

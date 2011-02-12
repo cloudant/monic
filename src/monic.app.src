@@ -23,5 +23,8 @@
                   crypto
                  ]},
   {mod, { monic_app, []}},
-  {env, []}
+  {env, [
+        {root_dir,"tmp"},
+        {concurrency, 10}
+  ]}
  ]}.
