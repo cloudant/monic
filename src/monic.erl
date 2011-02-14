@@ -24,18 +24,21 @@ stop() ->
     application:stop(monic).
 
 write(Group, Bin) when is_binary(Bin) ->
-    gen_server:call(group(Group), {write, Bin}, infinity);
-write(Group, Fun) when is_function(Fun) -> % TODO
-    gen_server:call(group(Group), {write, Fun}, infinity).
+    call(Group, {write, Bin});
+write(Group, Fun) when is_function(Fun) ->
+    call(Group, {write, Fun}).
 
 read(Group, #handle{}=Handle) ->
-    gen_server:call(group(Group), {read, Handle}, infinity).
+    call(Group, {read, Handle}).
 
-read(Group, #handle{}=Handle, Fun) when is_function(Fun) -> % TODO
-    gen_server:call(group(Group), {read, Handle, Fun}, infinity).
+read(Group, #handle{}=Handle, Fun) when is_function(Fun) ->
+    call(Group, {read, Handle, Fun}).
 
 delete(Group, #handle{}=Handle) ->
-    gen_server:call(group(Group), {delete, Handle}, infinity).
+    call(Group, {delete, Handle}).
+
+call(Group, Msg) ->
+    gen_server:call(group(Group), Msg, infinity).
 
 group(Group) ->
     Spec = {
