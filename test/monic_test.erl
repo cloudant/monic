@@ -12,7 +12,7 @@
 %% License for the specific language governing permissions and limitations under
 %% the License.
 
--module(monic_file_test).
+-module(monic_test).
 -include("monic.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
@@ -20,17 +20,15 @@ basic_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun basic/1}.
 
 setup() ->
-    {ok, Pid} = monic_file:start_link("bar"),
-    Pid.
+    monic:start().
 
 cleanup(Pid) ->
-    monic_file:close(Pid).
+    monic:stop().
 
 basic(Pid) ->
+    Group = "foo",
     Bin = <<"hello this is a quick test">>,
-    {ok, Handle} = monic_file:write(Pid, Bin),
-    {ok, Bin1} = monic_file:read(Pid, Handle),
-    ?assertEqual(Bin, Bin1),
-    ?_assertEqual({error,invalid_cookie},
-                 monic_file:read(Pid, Handle#handle{cookie="foo"})).
+    {ok, Handle} = monic:write(Group, Bin),
+    {ok, Bin1} = monic:read(Group, Handle),
+    ?assertEqual(Bin, Bin1).
 
