@@ -6,11 +6,16 @@
 * deletion
 * compaction
 
-
-
 write(Name, Fun)
 
 Fun produces;
 {ok, Bin}
 eof
 {error, Reason}
+
+== Preallocation ==
+
+* Extend to prealloc size on creation using fallocate/2
+* Eof tracked in header.
+* clean flag written to header on clean close.
+* if !clean, start at Eof and skip over all entries to real Eof, write down new Eof.
