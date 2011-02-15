@@ -21,7 +21,7 @@ all_test_() ->
      fun setup/0,
      fun cleanup/1,
      [
-      {timeout, 30, fun() -> ?debugTime("basic test", basic()) end}
+      {timeout, 30, fun() -> basic() end}
      ]}.
 
 setup() ->
