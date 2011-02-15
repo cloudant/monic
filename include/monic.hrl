@@ -14,7 +14,7 @@
 
 -record(handle, {
           vsn=1,
-          % uuid %% uuid of file container.
+          uuid,
           cookie,
           location
          }).

@@ -21,7 +21,7 @@
 %% gen_server API
 -export([init/1, terminate/2, code_change/3,handle_call/3, handle_cast/2, handle_info/2]).
 
--record(state, {path, fd, eof}).
+-record(state, {uuid, fd, eof}).
 
 -record(file_header, {uuid, eof}).
 -define(FILE_HEADER_VERSION, 1).
@@ -58,7 +58,7 @@ init(Path) ->
         {ok, Fd} ->
             case get_file_header(Fd) of
                 {ok, #file_header{eof=Eof,uuid=UUID}} ->
-                    {ok, #state{path=Path,eof=Eof,fd=Fd}};
+                    {ok, #state{uuid=UUID,eof=Eof,fd=Fd}};
                 {error, Reason} ->
                     {stop, Reason}
             end;
@@ -66,7 +66,7 @@ init(Path) ->
             {stop, Reason}
     end.
 
-handle_call({write, Bin}, _From, #state{eof=Eof,fd=Fd}=State) ->
+handle_call({write, Bin}, _From, #state{uuid=UUID,eof=Eof,fd=Fd}=State) ->
     Cookie = crypto:rand_bytes(16),
     ItemHeader = #item_header{cookie=Cookie, len=iolist_size(Bin)},
     Bin1 = [item_header_to_binary(ItemHeader), Bin],
@@ -75,7 +75,7 @@ handle_call({write, Bin}, _From, #state{eof=Eof,fd=Fd}=State) ->
         ok ->
             case file:datasync(Fd) of
                 ok ->
-                    Handle = #handle{location=Eof, cookie=Cookie},
+                    Handle = #handle{location=Eof, uuid=UUID, cookie=Cookie},
                     {reply, {ok, Handle}, State#state{eof=Eof+Size1}};
                 Else ->
                     {reply, Else, State}
@@ -83,6 +83,8 @@ handle_call({write, Bin}, _From, #state{eof=Eof,fd=Fd}=State) ->
         Else ->
             {reply, Else, State}
     end;
+handle_call({read, #handle{uuid=UUID}}, _From, #state{uuid=UUID1}=State) when UUID /= UUID1 ->
+    {reply, {error, wrong_file}, State};
 handle_call({read, #handle{location=Location,cookie=Cookie}=Handle}, _From, #state{fd=Fd}=State) ->
     case read_item_header(Fd, Location) of
         {ok, #item_header{cookie=Cookie,len=Len}} ->
@@ -134,7 +136,12 @@ read_file_header(Fd) ->
 
 write_file_header(Fd) ->
     NewHeader = #file_header{uuid=crypto:rand_bytes(16),eof=?FILE_HEADER_SIZE},
-    write_file_header(Fd, NewHeader).
+    case write_file_header(Fd, NewHeader) of
+        ok ->
+            {ok, NewHeader};
+        Else ->
+            Else
+    end.
 
 write_file_header(Fd, Header) ->
     file:pwrite(Fd, 0, file_header_to_iolist(Header)).
