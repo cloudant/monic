@@ -106,9 +106,14 @@ header_to_binary(#header{cookie=Cookie,len=Len,flags=Flags}) ->
       Flags:16/integer, Len:64/integer>>.
 
 binary_to_header(Bin) ->
-    <<_Magic:8/binary, _Version:16/integer, Cookie:16/binary,
+    <<Magic:8/binary, Version:16/integer, Cookie:16/binary,
       Flags:16/integer, Len:64/integer>> = Bin,
-    #header{cookie=Cookie,len=Len,flags=Flags}.
+    case {Magic, Version} of
+        {?HEADER_MAGIC, ?VSN} ->
+            #header{cookie=Cookie,len=Len,flags=Flags};
+        _ ->
+            {error, invalid_header}
+    end.
 
 read_header(Fd, Location) ->
     case file:pread(Fd, Location, ?HEADER_SIZE) of
