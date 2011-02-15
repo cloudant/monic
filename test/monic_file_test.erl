@@ -17,7 +17,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 basic_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun basic/1}.
+    {setup, fun setup/0, fun cleanup/1, fun instantiate/1}.
 
 setup() ->
     {ok, Pid} = monic_file:start_link("bar"),
@@ -26,11 +26,11 @@ setup() ->
 cleanup(Pid) ->
     monic_file:close(Pid).
 
-basic(Pid) ->
+instantiate(Pid) ->
     Bin = <<"hello this is a quick test">>,
     {ok, Handle} = monic_file:write(Pid, Bin),
     {ok, Bin1} = monic_file:read(Pid, Handle),
-    ?assertEqual(Bin, Bin1),
-    ?_assertEqual({error,invalid_cookie},
-                 monic_file:read(Pid, Handle#handle{cookie="foo"})).
+    Error = monic_file:read(Pid, Handle#handle{cookie="foo"}),
+    [?_assertEqual(Bin, Bin1),
+     ?_assertEqual({error,invalid_cookie}, Error)].
 

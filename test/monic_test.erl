@@ -16,16 +16,21 @@
 -include("monic.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
-basic_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun basic/1}.
+all_test_() ->
+    {setup,
+     fun setup/0,
+     fun cleanup/1,
+     [
+      {timeout, 30, fun() -> ?debugTime("basic test", basic()) end}
+     ]}.
 
 setup() ->
     monic:start().
 
-cleanup(Pid) ->
+cleanup(_) ->
     monic:stop().
 
-basic(Pid) ->
+basic() ->
     Group = "foo",
     Bin = <<"hello this is a quick test">>,
     {ok, Handle} = monic:write(Group, Bin),
