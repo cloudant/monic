@@ -56,7 +56,7 @@ handle_info({Ref, Reply}, #state{idle=Idle,active=Active,reqs=Reqs}=State) ->
             Reqs2 = lists:keydelete(Ref, 2, Reqs),
             {noreply, make_next_request(State#state{
                                           reqs=Reqs2,
-                                          idle=[Worker] ++ Idle,
+                                          idle=Idle ++ [Worker],
                                           active = [A || A <- Active, A /= Worker]
                                          })};
         false ->
@@ -69,7 +69,7 @@ handle_info({'DOWN', Ref, _, _, Reason}, #state{idle=Idle,active=Active,reqs=Req
             Reqs2 = lists:keydelete(Ref, 2, Reqs),
             {noreply, make_next_request(State#state{
                                           reqs=Reqs2,
-                                          idle=[Worker] ++ Idle,
+                                          idle=Idle ++ [Worker],
                                           active = [A || A <- Active, A /= Worker]
                                          })};
         false ->
