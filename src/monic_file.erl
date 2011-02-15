@@ -75,8 +75,10 @@ handle_call({write, Bin}, _From, #state{uuid=UUID,eof=Eof,fd=Fd}=State) ->
         ok ->
             case file:datasync(Fd) of
                 ok ->
+                    Eof1 = Eof + Size1,
                     Handle = #handle{location=Eof, uuid=UUID, cookie=Cookie},
-                    {reply, {ok, Handle}, State#state{eof=Eof+Size1}};
+                    write_file_header(Fd, #file_header{uuid=UUID, eof=Eof1}),
+                    {reply, {ok, Handle}, State#state{eof=Eof1}};
                 Else ->
                     {reply, Else, State}
             end;
