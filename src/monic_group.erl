@@ -48,30 +48,20 @@ handle_call(Msg, From, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_info({Ref, Reply}, #state{idle=Idle,active=Active,reqs=Reqs}=State) ->
-    case lists:keyfind(Ref, 1, Reqs) of
-        {Ref, From, Worker} ->
+handle_info({Ref, Reply}, State) ->
+    case return_worker(Ref, State) of
+        {From, State1} ->
             erlang:demonitor(Ref, [flush]),
             gen_server:reply(From, Reply),
-            Reqs2 = lists:keydelete(Ref, 2, Reqs),
-            {noreply, make_next_request(State#state{
-                                          reqs=Reqs2,
-                                          idle=Idle ++ [Worker],
-                                          active = [A || A <- Active, A /= Worker]
-                                         })};
+            {noreply, maybe_submit_request(State1)};
         false ->
             {noreply, maybe_submit_request(State)}
     end;
-handle_info({'DOWN', Ref, _, _, Reason}, #state{idle=Idle,active=Active,reqs=Reqs}=State) ->
-    case lists:keyfind(Ref, 1, Reqs) of
-        {Ref, From, Worker} ->
+handle_info({'DOWN', Ref, _, _, Reason}, State) ->
+    case return_worker(Ref, State) of
+        {From, State1} ->
             gen_server:reply(From, {'EXIT', Reason}),
-            Reqs2 = lists:keydelete(Ref, 2, Reqs),
-            {noreply, make_next_request(State#state{
-                                          reqs=Reqs2,
-                                          idle=Idle ++ [Worker],
-                                          active = [A || A <- Active, A /= Worker]
-                                         })};
+            {noreply, maybe_submit_request(State1)};
         false ->
             {noreply, State}
     end.
@@ -88,21 +78,55 @@ enqueue(Request, #state{channel=Channel}=State) ->
     State1 = State#state{channel=queue:in(Request, Channel)},
     maybe_submit_request(State1).
 
-maybe_submit_request(#state{idle=[]}=State) ->
-    State;
-maybe_submit_request(#state{idle=[_Worker|_]} = State) ->
-    make_next_request(State).
+maybe_submit_request(#state{idle=Idle,channel=Channel}=State) ->
+    case queue:peek(Channel) of
+        {value,{Msg,_}} ->
+            case choose_worker(Msg, Idle) of
+                false ->
+                    State;
+                Worker ->
+                    make_next_request(Worker, State)
+            end;
+        empty ->
+            State
+    end.
 
-make_next_request(#state{idle=[Worker|Rest],active=Active,channel=Channel,reqs=Reqs}=State) ->
+make_next_request({_, Pid}=Worker, #state{idle=Idle,active=Active,channel=Channel,reqs=Reqs}=State) ->
     case queue:out(Channel) of
         {{value, {Msg, From}}, Channel1} ->
-            Ref = erlang:monitor(process, Worker),
-            Worker ! {'$gen_call', {self(), Ref}, Msg},
+            Ref = erlang:monitor(process, Pid),
+            Pid ! {'$gen_call', {self(), Ref}, Msg},
             State#state{
               reqs=[{Ref, From, Worker} | Reqs],
-              idle=Rest,
+              idle=[I || I <- Idle, I /= Worker],
               active=[Worker] ++ Active,
               channel=Channel1};
         {empty, Channel} ->
             State
+    end.
+
+choose_worker(_Request, []) ->
+    false;
+choose_worker({write, _}, [H|_]) ->
+    H;
+choose_worker({read, #handle{uuid=UUID}}, Workers) ->
+    case lists:keysearch(UUID, 1, Workers) of
+        {value, Worker} ->
+            Worker;
+        false ->
+            false
+    end.
+
+return_worker(Ref, #state{idle=Idle,active=Active,reqs=Reqs}=State) ->
+    case lists:keyfind(Ref, 1, Reqs) of
+        {Ref, From, Worker} ->
+            Reqs1 = lists:keydelete(Ref, 2, Reqs),
+            {From,
+             State#state{
+               reqs=Reqs1,
+               idle=Idle ++ [Worker],
+               active = [A || A <- Active, A /= Worker]
+              }};
+        false ->
+            false
     end.

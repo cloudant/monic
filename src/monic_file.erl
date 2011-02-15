@@ -40,7 +40,13 @@
 %% public functions
 
 start_link(Path) ->
-    gen_server:start_link({local, list_to_atom(Path)}, ?MODULE, Path, []).
+    case gen_server:start_link({local, list_to_atom(Path)}, ?MODULE, Path, []) of
+        {ok, Pid} ->
+            UUID = gen_server:call(Pid, uuid),
+            {ok, {UUID, Pid}};
+        Else ->
+            Else
+    end.
 
 close(Pid) ->
     gen_server:call(Pid, close, infinity).
@@ -97,7 +103,9 @@ handle_call({read, #handle{location=Location,cookie=Cookie}=Handle}, _From, #sta
             Else
     end;
 handle_call(close, _From, #state{fd=Fd}=State) ->
-    {stop, normal, file:close(Fd), State#state{fd=nil}}.
+    {stop, normal, file:close(Fd), State#state{fd=nil}};
+handle_call(uuid, _From, #state{uuid=UUID}=State) ->
+    {reply, UUID, State}.
 
 handle_cast(_Msg, State) ->
     {noreply, State}.

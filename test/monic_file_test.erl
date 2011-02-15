@@ -20,7 +20,7 @@ basic_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun instantiate/1}.
 
 setup() ->
-    {ok, Pid} = monic_file:start_link("bar"),
+    {ok, {_, Pid}} = monic_file:start_link("bar"),
     Pid.
 
 cleanup(Pid) ->
