@@ -21,7 +21,10 @@ all_test_() ->
      fun setup/0,
      fun cleanup/1,
      [
-      {timeout, 30, fun() -> basic() end}
+      {timeout, 30, fun() -> write_read() end},
+      {timeout, 30, fun() -> unique_cookies() end},
+      {timeout, 30, fun() -> unforgeable_cookie() end},
+      {timeout, 30, fun() -> balanced_writers() end}
      ]}.
 
 setup() ->
@@ -30,10 +33,27 @@ setup() ->
 cleanup(_) ->
     monic:stop().
 
-basic() ->
-    Group = "foo",
+write_read() ->
     Bin = <<"hello this is a quick test">>,
-    {ok, Handle} = monic:write(Group, Bin),
-    {ok, Bin1} = monic:read(Group, Handle),
+    {ok, Handle} = monic:write("foo", Bin),
+    {ok, Bin1} = monic:read("foo", Handle),
     ?assertEqual(Bin, Bin1).
 
+unique_cookies() ->
+    Bin = <<"hello this is a quick test">>,
+    {ok, Handle1} = monic:write("foo", Bin),
+    {ok, Handle2} = monic:write("foo", Bin),
+    ?assertNot(Handle1#handle.cookie == Handle2#handle.cookie).
+
+balanced_writers() ->
+    Bin = <<"hello this is a quick test">>,
+    {ok, Handle1} = monic:write("foo", Bin),
+    {ok, Handle2} = monic:write("foo", Bin),
+    ?assertNot(Handle1#handle.uuid == Handle2#handle.uuid).
+
+unforgeable_cookie() ->
+    Bin = <<"hello this is a quick test">>,
+    {ok, Handle} = monic:write("foo", Bin),
+    ?assertEqual({ok, Bin}, monic:read("foo", Handle)),
+    ?assertEqual({error,invalid_cookie},
+                 monic:read("foo", Handle#handle{cookie="foo"})).
