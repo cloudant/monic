@@ -124,7 +124,13 @@ handle_call({read, #handle{location=Location,cookie=Cookie}=Handle}, _From, #sta
 handle_call({read, #handle{location=Location,cookie=Cookie}=Handle, Fun}, _From, #state{fd=Fd}=State) ->
     case read_item_header(Fd, Location) of
         {ok, #item_header{cookie=Cookie,len=Len}} ->
-            {reply, stream_out(Fd, Fun, Location + ?ITEM_HEADER_SIZE, Len), State};
+            case stream_out(Fd, Fun, Location + ?ITEM_HEADER_SIZE, Len) of
+                {ok, Sha} ->
+                    Fun(eof),
+                    {reply, ok, State};
+                Else ->
+                    {reply, Else, State}
+            end;
         {ok, #item_header{cookie=Cookie1}} ->
             {reply, {error, invalid_cookie}, State};
         Else ->
@@ -241,15 +247,19 @@ stream_in(Fd, Fun, Eof, Len, Sha) ->
             Error
     end.
 
-stream_out(Fd, Fun, Location, 0) ->
-    Fun(eof),
-    ok;
-stream_out(Fd, Fun, Location, Remaining) when Remaining > 0 ->
+
+stream_out(Fd, Fun, Location, Len) ->
+    stream_out(Fd, Fun, Location, Len, crypto:sha_init()).
+
+stream_out(Fd, Fun, Location, 0, Sha) ->
+    {ok, crypto:sha_final(Sha)};
+stream_out(Fd, Fun, Location, Remaining, Sha) when Remaining > 0 ->
     case file:pread(Fd, Location, min(Remaining, ?BUFFER_SIZE)) of
         {ok, Bin} ->
             Size = iolist_size(Bin),
             Fun({ok, Bin}),
-            stream_out(Fd, Fun, Location + Size, Remaining - Size);
+            stream_out(Fd, Fun, Location + Size, Remaining - Size,
+                       crypto:sha_update(Sha, Bin));
         Else ->
             Else
     end.
