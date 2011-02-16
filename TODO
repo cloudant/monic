@@ -1,21 +1,14 @@
-* streaming
-* checksums
-* cookies
+* streaming - DONE
+* checksums - 1/2 DONE, created on write but not verified on read
+* cookies - DONE
 * reader concurrency
 * preallocation
 * deletion
 * compaction
 
-write(Name, Fun)
-
-Fun produces;
-{ok, Bin}
-eof
-{error, Reason}
-
 == Preallocation ==
 
 * Extend to prealloc size on creation using fallocate/2
 * Eof tracked in header.
-* clean flag written to header on clean close.
-* if !clean, start at Eof and skip over all entries to real Eof, write down new Eof.
+* start at Eof and skip over all entries to real Eof, write down new Eof if different.
+
