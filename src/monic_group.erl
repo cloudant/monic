@@ -40,6 +40,7 @@ init(Group) ->
                    {ok, W} = monic_file:start_link(Path),
                    W
                end || N <- lists:seq(1, C)],
+    %% open all existing files too!
     {ok, #state{idle=Workers}}.
 
 handle_call(Msg, From, State) ->
