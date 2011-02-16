@@ -21,7 +21,8 @@ all_test_() ->
      fun setup/0,
      fun cleanup/1,
      [
-      {timeout, 30, fun() -> write_read() end},
+      {timeout, 30, fun() -> write_bin() end},
+      {timeout, 30, fun() -> write_fun() end},
       {timeout, 30, fun() -> unique_cookies() end},
       {timeout, 30, fun() -> unforgeable_cookie() end},
       {timeout, 30, fun() -> balanced_writers() end}
@@ -33,11 +34,24 @@ setup() ->
 cleanup(_) ->
     monic:stop().
 
-write_read() ->
+write_bin() ->
     Bin = <<"hello this is a quick test">>,
     {ok, Handle} = monic:write("foo", Bin),
     {ok, Bin1} = monic:read("foo", Handle),
     ?assertEqual(Bin, Bin1).
+
+write_fun() ->
+    Fun = fun(_) ->
+                  case get(next) of
+                      undefined ->
+                          put(next, {ok, <<"foobar">>});
+                      {ok, _} ->
+                          put(next, eof)
+                  end,
+                  get(next) end,
+    {ok, Handle} = monic:write("foo", Fun),
+    {ok, Bin1} = monic:read("foo", Handle),
+    ?assertEqual(<<"foobar">>, Bin1).
 
 unique_cookies() ->
     Bin = <<"hello this is a quick test">>,

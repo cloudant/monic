@@ -37,6 +37,8 @@
 -define(ITEM_FOOTER_SIZE, 28).
 -define(ITEM_FOOTER_MAGIC, 15866124023828541222).
 
+-define(MAX_BUFFER_SIZE, 16384).
+
 %% public functions
 
 start_link(Path) ->
@@ -72,7 +74,7 @@ init(Path) ->
             {stop, Reason}
     end.
 
-handle_call({write, Bin}, _From, #state{uuid=UUID,eof=Eof,fd=Fd}=State) ->
+handle_call({write, Bin}, _From, #state{uuid=UUID,eof=Eof,fd=Fd}=State) when is_binary(Bin) ->
     Cookie = crypto:rand_bytes(16),
     ItemHeader = #item_header{cookie=Cookie, len=iolist_size(Bin)},
     Bin1 = [item_header_to_binary(ItemHeader), Bin],
@@ -89,6 +91,27 @@ handle_call({write, Bin}, _From, #state{uuid=UUID,eof=Eof,fd=Fd}=State) ->
                     {reply, Else, State}
             end;
         Else ->
+            {reply, Else, State}
+    end;
+handle_call({write, Fun}, _From, #state{uuid=UUID,eof=Eof,fd=Fd}=State) when is_function(Fun) ->
+    case copy(Fd, Fun, Eof + ?ITEM_HEADER_SIZE) of
+        {ok, Eof1, Len, Sha} ->
+            Cookie = crypto:rand_bytes(16),
+            Header = #item_header{cookie=Cookie, len=Len},
+            case file:pwrite(Fd, Eof, item_header_to_binary(Header)) of
+                ok ->
+                    case file:datasync(Fd) of
+                        ok ->
+                            Handle = #handle{location=Eof, uuid=UUID, cookie=Cookie},
+                            write_file_header(Fd, #file_header{uuid=UUID, eof=Eof1}),
+                            {reply, {ok, Handle}, State#state{eof=Eof1}};
+                        Else ->
+                            {reply, Else, State}
+                    end;
+                Else->
+                    {reply, Else, State}
+            end;
+        Else->
             {reply, Else, State}
     end;
 handle_call({read, #handle{uuid=UUID}}, _From, #state{uuid=UUID1}=State) when UUID /= UUID1 ->
@@ -120,6 +143,8 @@ terminate(Reason, #state{fd=Fd}) ->
 
 code_change(_OldVsn, State, _Extra) ->
   {ok, State}.
+
+%% private functions
 
 get_file_header(Fd) ->
     case read_file_header(Fd) of
@@ -189,4 +214,24 @@ binary_to_item_header(Bin) ->
             {ok, #item_header{cookie=Cookie,len=Len,flags=Flags}};
         _ ->
             {error, invalid_item_header}
+    end.
+
+copy(Fd, Fun, Eof) ->
+    copy(Fd, Fun, Eof, 0, crypto:sha_init()).
+
+copy(Fd, Fun, Eof, Len, Sha) ->
+    case Fun(?MAX_BUFFER_SIZE) of
+        {ok, Bin} ->
+            case file:pwrite(Fd, Eof, Bin) of
+                ok ->
+                    Size = iolist_size(Bin),
+                    copy(Fd, Fun, Eof + Size, Len + Size,
+                         crypto:sha_update(Sha, Bin));
+                Error ->
+                    Error
+            end;
+        eof ->
+            {ok, Eof, Len, crypto:sha_final(Sha)};
+        Error ->
+            Error
     end.
