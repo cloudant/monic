@@ -23,6 +23,7 @@ all_test_() ->
      [
       {timeout, 30, fun() -> write_bin() end},
       {timeout, 30, fun() -> write_fun() end},
+      {timeout, 30, fun() -> read_fun() end},
       {timeout, 30, fun() -> unique_cookies() end},
       {timeout, 30, fun() -> unforgeable_cookie() end},
       {timeout, 30, fun() -> balanced_writers() end}
@@ -52,6 +53,11 @@ write_fun() ->
     {ok, Handle} = monic:write("foo", Fun),
     {ok, Bin1} = monic:read("foo", Handle),
     ?assertEqual(<<"foobar">>, Bin1).
+
+read_fun() ->
+    {ok, Handle} = monic:write("foo", <<"foobar">>),
+    Fun = fun(R) -> erlang:display(R) end,
+    ok = monic:read("foo", Handle, Fun).
 
 unique_cookies() ->
     Bin = <<"hello this is a quick test">>,

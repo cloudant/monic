@@ -111,6 +111,11 @@ choose_worker(_Request, []) ->
 choose_worker({write, _}, [H|_]) ->
     H;
 choose_worker({read, #handle{uuid=UUID}}, Workers) ->
+    choose_worker_by_uuid(UUID, Workers);
+choose_worker({read, #handle{uuid=UUID}, _}, Workers) ->
+    choose_worker_by_uuid(UUID, Workers).
+
+choose_worker_by_uuid(UUID, Workers) ->
     case lists:keysearch(UUID, 1, Workers) of
         {value, Worker} ->
             Worker;

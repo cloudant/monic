@@ -16,7 +16,7 @@
 -include("monic.hrl").
 
 %% public API
--export([start_link/1, close/1, write/2, read/2]).
+-export([start_link/1, close/1]).
 
 %% gen_server API
 -export([init/1, terminate/2, code_change/3,handle_call/3, handle_cast/2, handle_info/2]).
@@ -37,7 +37,7 @@
 -define(ITEM_FOOTER_SIZE, 28).
 -define(ITEM_FOOTER_MAGIC, 15866124023828541222).
 
--define(MAX_BUFFER_SIZE, 16384).
+-define(BUFFER_SIZE, 16384).
 
 %% public functions
 
@@ -52,12 +52,6 @@ start_link(Path) ->
 
 close(Pid) ->
     gen_server:call(Pid, close, infinity).
-
-write(Pid, Bin) when is_binary(Bin) ->
-    gen_server:call(Pid, {write, Bin}, infinity).
-
-read(Pid, #handle{}=Handle) ->
-    gen_server:call(Pid, {read, Handle}, infinity).
 
 %% gen_server functions
 
@@ -74,6 +68,7 @@ init(Path) ->
             {stop, Reason}
     end.
 
+%% kill the following clause.
 handle_call({write, Bin}, _From, #state{uuid=UUID,eof=Eof,fd=Fd}=State) when is_binary(Bin) ->
     Cookie = crypto:rand_bytes(16),
     ItemHeader = #item_header{cookie=Cookie, len=iolist_size(Bin)},
@@ -94,7 +89,7 @@ handle_call({write, Bin}, _From, #state{uuid=UUID,eof=Eof,fd=Fd}=State) when is_
             {reply, Else, State}
     end;
 handle_call({write, Fun}, _From, #state{uuid=UUID,eof=Eof,fd=Fd}=State) when is_function(Fun) ->
-    case copy(Fd, Fun, Eof + ?ITEM_HEADER_SIZE) of
+    case stream_in(Fd, Fun, Eof + ?ITEM_HEADER_SIZE) of
         {ok, Eof1, Len, Sha} ->
             Cookie = crypto:rand_bytes(16),
             Header = #item_header{cookie=Cookie, len=Len},
@@ -116,10 +111,20 @@ handle_call({write, Fun}, _From, #state{uuid=UUID,eof=Eof,fd=Fd}=State) when is_
     end;
 handle_call({read, #handle{uuid=UUID}}, _From, #state{uuid=UUID1}=State) when UUID /= UUID1 ->
     {reply, {error, wrong_file}, State};
+%% kill the following clause.
 handle_call({read, #handle{location=Location,cookie=Cookie}=Handle}, _From, #state{fd=Fd}=State) ->
     case read_item_header(Fd, Location) of
         {ok, #item_header{cookie=Cookie,len=Len}} ->
             {reply, file:pread(Fd, Location+?ITEM_HEADER_SIZE, Len), State};
+        {ok, #item_header{cookie=Cookie1}} ->
+            {reply, {error, invalid_cookie}, State};
+        Else ->
+            Else
+    end;
+handle_call({read, #handle{location=Location,cookie=Cookie}=Handle, Fun}, _From, #state{fd=Fd}=State) ->
+    case read_item_header(Fd, Location) of
+        {ok, #item_header{cookie=Cookie,len=Len}} ->
+            {reply, stream_out(Fd, Fun, Location + ?ITEM_HEADER_SIZE, Len), State};
         {ok, #item_header{cookie=Cookie1}} ->
             {reply, {error, invalid_cookie}, State};
         Else ->
@@ -216,16 +221,16 @@ binary_to_item_header(Bin) ->
             {error, invalid_item_header}
     end.
 
-copy(Fd, Fun, Eof) ->
-    copy(Fd, Fun, Eof, 0, crypto:sha_init()).
+stream_in(Fd, Fun, Eof) ->
+    stream_in(Fd, Fun, Eof, 0, crypto:sha_init()).
 
-copy(Fd, Fun, Eof, Len, Sha) ->
-    case Fun(?MAX_BUFFER_SIZE) of
+stream_in(Fd, Fun, Eof, Len, Sha) ->
+    case Fun(?BUFFER_SIZE) of
         {ok, Bin} ->
             case file:pwrite(Fd, Eof, Bin) of
                 ok ->
                     Size = iolist_size(Bin),
-                    copy(Fd, Fun, Eof + Size, Len + Size,
+                    stream_in(Fd, Fun, Eof + Size, Len + Size,
                          crypto:sha_update(Sha, Bin));
                 Error ->
                     Error
@@ -234,4 +239,16 @@ copy(Fd, Fun, Eof, Len, Sha) ->
             {ok, Eof, Len, crypto:sha_final(Sha)};
         Error ->
             Error
+    end.
+
+stream_out(Fd, Fun, Location, 0) ->
+    ok;
+stream_out(Fd, Fun, Location, Remaining) when Remaining > 0 ->
+    case file:pread(Fd, Location, min(Remaining, ?BUFFER_SIZE)) of
+        {ok, Bin} ->
+            Size = iolist_size(Bin),
+            Fun({ok, Bin}),
+            stream_out(Fd, Fun, Location + Size, Remaining - Size);
+        Else ->
+            Else
     end.
