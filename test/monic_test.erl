@@ -56,7 +56,14 @@ write_fun() ->
 
 read_fun() ->
     {ok, Handle} = monic:write("foo", <<"foobar">>),
-    Fun = fun(R) -> erlang:display(R) end,
+    Fun = fun(R) ->
+                  case get(last) of
+                      undefined ->
+                          ?assertEqual({ok, <<"foobar">>}, R);
+                      {ok, <<"foobar">>} ->
+                          ?assertEqual(eof, R)
+                  end,
+                  put(last, R) end,
     ok = monic:read("foo", Handle, Fun).
 
 unique_cookies() ->

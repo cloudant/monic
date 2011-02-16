@@ -242,6 +242,7 @@ stream_in(Fd, Fun, Eof, Len, Sha) ->
     end.
 
 stream_out(Fd, Fun, Location, 0) ->
+    Fun(eof),
     ok;
 stream_out(Fd, Fun, Location, Remaining) when Remaining > 0 ->
     case file:pread(Fd, Location, min(Remaining, ?BUFFER_SIZE)) of
