@@ -29,8 +29,12 @@ cleanup(Pid) ->
 instantiate(Pid) ->
     Bin = <<"hello this is a quick test">>,
     {ok, Handle} = monic_file:write(Pid, Bin),
+    {ok, Handle1} = monic_file:write(Pid, Bin),
     {ok, Bin1} = monic_file:read(Pid, Handle),
     Error = monic_file:read(Pid, Handle#handle{cookie="foo"}),
     [?_assertEqual(Bin, Bin1),
+     ?_assertEqual(Handle#handle.uuid, Handle1#handle.uuid),
+     ?_assertNot(Handle#handle.location == Handle1#handle.location),
+     ?_assertNot(Handle#handle.cookie == Handle1#handle.cookie),
      ?_assertEqual({error,invalid_cookie}, Error)].
 
