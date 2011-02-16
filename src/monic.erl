@@ -46,9 +46,19 @@ group(Group) ->
       {gen_server, start_link, [monic_group, [Group], []]},
       temporary, 1, worker, [?MODULE]
      },
+    %% relevant parts of couch_rep.erl below.
     case supervisor:start_child(monic_sup, Spec) of
         {ok, Pid} ->
             Pid;
         {error, {already_started, Pid}} ->
-            Pid
+            Pid;
+        {error, already_present} ->
+            case supervisor:restart_child(monic_sup, Group) of
+                {ok, Pid} ->
+                    Pid;
+                {error, running} ->
+                    {error, {already_started, Pid}} =
+                        supervisor:start_child(monic_sup, Spec),
+                    Pid
+            end
     end.
