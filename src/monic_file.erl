@@ -84,10 +84,10 @@ handle_call({write, Bin}, _From, #state{uuid=UUID,eof=Eof,fd=Fd}=State) when is_
                     write_file_header(Fd, #file_header{uuid=UUID, eof=Eof1}),
                     {reply, {ok, Handle}, State#state{eof=Eof1}};
                 Else ->
-                    {reply, {error, Else}, State}
+                    {reply, Else, State}
             end;
         Else ->
-            {reply, {error, Else}, State}
+            {reply, Else, State}
     end;
 handle_call({write, Fun}, _From, #state{uuid=UUID,eof=Eof,fd=Fd}=State) when is_function(Fun) ->
     case stream_in(Fd, Fun, Eof + ?ITEM_HEADER_SIZE) of
@@ -106,16 +106,16 @@ handle_call({write, Fun}, _From, #state{uuid=UUID,eof=Eof,fd=Fd}=State) when is_
                                     write_file_header(Fd, #file_header{uuid=UUID, eof=Eof2}),
                                 {reply, {ok, Handle}, State#state{eof=Eof2}};
                                 Else ->
-                                    {reply, {error, Else}, State}
+                                    {reply, Else, State}
                             end;
                         Else ->
-                            {reply, {error, Else}, State}
+                            {reply, Else, State}
                     end;
                 Else->
-                    {reply, {error, Else}, State}
+                    {reply, Else, State}
             end;
         Else->
-            {reply, {error, Else}, State}
+            {reply, Else, State}
     end;
 handle_call({read, #handle{uuid=UUID}}, _From, #state{uuid=UUID1}=State) when UUID /= UUID1 ->
     {reply, {error, wrong_file}, State};
@@ -127,7 +127,7 @@ handle_call({read, #handle{location=Location,cookie=Cookie}}, _From, #state{fd=F
         {ok, #item_header{}} ->
             {reply, {error, invalid_cookie}, State};
         Else ->
-            {reply, {error, Else}, State}
+            {reply, Else, State}
     end;
 handle_call({read, Handle, Fun}, From, State) ->
     handle_call({read, Handle, [], Fun}, From, State);
@@ -155,18 +155,18 @@ handle_call({read, #handle{location=Location,cookie=Cookie}, Ranges, Fun}, _From
                                     Fun(eof),
                                     {reply, ok, State};
                                 Else ->
-                                    {reply, {error, Else}, State}
+                                    {reply, Else, State}
                             end;
                         Else ->
-                            {reply, {error, Else}, State}
+                            {reply, Else, State}
                     end;
                 Else ->
-                    {reply, {error, Else}, State}
+                    {reply, Else, State}
             end;
         {ok, #item_header{}} ->
             {reply, {error, invalid_cookie}, State};
         Else ->
-            {reply, {error, Else}, State}
+            {reply, Else, State}
     end;
 handle_call(close, _From, #state{fd=Fd}=State) ->
     {stop, normal, file:close(Fd), State#state{fd=nil}};
