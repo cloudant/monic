@@ -113,6 +113,8 @@ choose_worker({write, _}, [H|_]) ->
 choose_worker({read, #handle{uuid=UUID}}, Workers) ->
     choose_worker_by_uuid(UUID, Workers);
 choose_worker({read, #handle{uuid=UUID}, _}, Workers) ->
+    choose_worker_by_uuid(UUID, Workers);
+choose_worker({read, #handle{uuid=UUID}, _, _}, Workers) ->
     choose_worker_by_uuid(UUID, Workers).
 
 choose_worker_by_uuid(UUID, Workers) ->

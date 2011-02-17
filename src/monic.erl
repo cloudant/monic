@@ -14,7 +14,7 @@
 
 -module(monic).
 -export([start/0, stop/0]).
--export([write/2, read/2, read/3, delete/2]).
+-export([write/2, read/2, read/3, read/4, delete/2]).
 -include("monic.hrl").
 
 start() ->
@@ -33,6 +33,9 @@ read(Group, #handle{}=Handle) ->
 
 read(Group, #handle{}=Handle, Fun) when is_function(Fun) ->
     call(Group, {read, Handle, Fun}).
+
+read(Group, #handle{}=Handle, Ranges, Fun) when is_function(Fun) ->
+    call(Group, {read, Handle, Ranges, Fun}).
 
 delete(Group, #handle{}=Handle) ->
     call(Group, {delete, Handle}).

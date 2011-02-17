@@ -129,19 +129,34 @@ handle_call({read, #handle{location=Location,cookie=Cookie}}, _From, #state{fd=F
         Else ->
             {reply, {error, Else}, State}
     end;
-handle_call({read, #handle{location=Location,cookie=Cookie}, Fun}, _From, #state{fd=Fd}=State) ->
+handle_call({read, Handle, Fun}, From, State) ->
+    handle_call({read, Handle, [], Fun}, From, State);
+handle_call({read, #handle{location=Location,cookie=Cookie}, Ranges, Fun}, _From, #state{fd=Fd}=State) ->
     case read_item_header(Fd, Location) of
         {ok, #item_header{cookie=Cookie,len=Len}} ->
-            case stream_out(Fd, Fun, Location + ?ITEM_HEADER_SIZE, Len) of
-                {ok, CalculatedSha} ->
-                    case read_item_footer(Fd, Location + ?ITEM_HEADER_SIZE + Len) of
-                        {ok, #item_footer{sha=RecordedSha}} ->
-                            case RecordedSha of
-                                CalculatedSha -> Fun({checksum, valid});
-                                _ -> Fun({checksum, invalid})
-                            end,
-                            Fun(eof),
-                            {reply, ok, State};
+            Ranges1 = case Ranges of
+                          [] -> [{0, Len}];
+                          _ -> Ranges
+                      end,
+            case validate_ranges(Ranges1, Len) of
+                ok ->
+                    Start = Location + ?ITEM_HEADER_SIZE,
+                    case lists:foldl(fun({RangeOff, RangeLen}, _) ->
+                                             stream_out(Fd, Fun, Start + RangeOff, RangeLen)
+                                     end, fail, Ranges1) of
+                        {ok, CalculatedSha} ->
+                            case read_item_footer(Fd, Location + ?ITEM_HEADER_SIZE + Len) of
+                                {ok, #item_footer{sha=RecordedSha}} ->
+                                    case {Ranges1, RecordedSha} of
+                                        {[{0, Len}], CalculatedSha} -> Fun({checksum, valid});
+                                        {[{0, Len}], _OtherSha} -> Fun({checksum, invalid});
+                                        _ -> ok
+                                    end,
+                                    Fun(eof),
+                                    {reply, ok, State};
+                                Else ->
+                                    {reply, {error, Else}, State}
+                            end;
                         Else ->
                             {reply, {error, Else}, State}
                     end;
@@ -298,4 +313,14 @@ stream_out(Fd, Fun, Location, Remaining, Sha) when Remaining > 0 ->
                        crypto:sha_update(Sha, Bin));
         Else ->
             Else
+    end.
+
+validate_ranges([], _MaxLen) ->
+    ok;
+validate_ranges([{From, Len}|T], MaxLen) ->
+    case From >= 0 andalso (From+Len) =< MaxLen of
+        true ->
+            validate_ranges(T, MaxLen);
+        false ->
+            {error, invalid_range}
     end.

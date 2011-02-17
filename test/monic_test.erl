@@ -24,6 +24,7 @@ all_test_() ->
       {timeout, 30, fun() -> write_bin() end},
       {timeout, 30, fun() -> write_fun() end},
       {timeout, 30, fun() -> read_fun() end},
+      {timeout, 30, fun() -> range_read() end},
       {timeout, 30, fun() -> unique_cookies() end},
       {timeout, 30, fun() -> unforgeable_cookie() end},
       {timeout, 30, fun() -> balanced_writers() end}
@@ -62,6 +63,18 @@ read_fun() ->
                   end,
                   put(last, R) end,
     ok = monic:read("foo", Handle, Fun).
+
+range_read() ->
+    {ok, Handle} = monic:write("foo", <<"foobar">>),
+    Fun = fun(R) ->
+                  case get(last) of
+                      undefined ->
+                          ?assertEqual({ok, <<"ooba">>}, R);
+                      {ok, <<"ooba">>} ->
+                          ?assertEqual(eof, R)
+                  end,
+                  put(last, R) end,
+    ok = monic:read("foo", Handle, [{1, 4}], Fun).
 
 unique_cookies() ->
     Bin = <<"hello this is a quick test">>,
