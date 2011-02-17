@@ -71,8 +71,9 @@ init(Path) ->
 %% kill the following clause.
 handle_call({write, Bin}, _From, #state{uuid=UUID,eof=Eof,fd=Fd}=State) when is_binary(Bin) ->
     Cookie = crypto:rand_bytes(16),
-    ItemHeader = #item_header{cookie=Cookie, len=iolist_size(Bin)},
-    Bin1 = [item_header_to_binary(ItemHeader), Bin],
+    Header = #item_header{cookie=Cookie, len=iolist_size(Bin)},
+    Footer = #item_footer{sha=crypto:sha(Bin)},
+    Bin1 = [item_header_to_binary(Header), Bin, item_footer_to_binary(Footer)],
     Size1 = iolist_size(Bin1),
     case file:pwrite(Fd, Eof, Bin1) of
         ok ->
@@ -83,10 +84,10 @@ handle_call({write, Bin}, _From, #state{uuid=UUID,eof=Eof,fd=Fd}=State) when is_
                     write_file_header(Fd, #file_header{uuid=UUID, eof=Eof1}),
                     {reply, {ok, Handle}, State#state{eof=Eof1}};
                 Else ->
-                    {reply, Else, State}
+                    {reply, {error, Else}, State}
             end;
         Else ->
-            {reply, Else, State}
+            {reply, {error, Else}, State}
     end;
 handle_call({write, Fun}, _From, #state{uuid=UUID,eof=Eof,fd=Fd}=State) when is_function(Fun) ->
     case stream_in(Fd, Fun, Eof + ?ITEM_HEADER_SIZE) of
@@ -105,16 +106,16 @@ handle_call({write, Fun}, _From, #state{uuid=UUID,eof=Eof,fd=Fd}=State) when is_
                                     write_file_header(Fd, #file_header{uuid=UUID, eof=Eof2}),
                                 {reply, {ok, Handle}, State#state{eof=Eof2}};
                                 Else ->
-                                    {reply, Else, State}
+                                    {reply, {error, Else}, State}
                             end;
                         Else ->
-                            {reply, Else, State}
+                            {reply, {error, Else}, State}
                     end;
                 Else->
-                    {reply, Else, State}
+                    {reply, {error, Else}, State}
             end;
         Else->
-            {reply, Else, State}
+            {reply, {error, Else}, State}
     end;
 handle_call({read, #handle{uuid=UUID}}, _From, #state{uuid=UUID1}=State) when UUID /= UUID1 ->
     {reply, {error, wrong_file}, State};
@@ -126,22 +127,30 @@ handle_call({read, #handle{location=Location,cookie=Cookie}=Handle}, _From, #sta
         {ok, #item_header{cookie=Cookie1}} ->
             {reply, {error, invalid_cookie}, State};
         Else ->
-            Else
+            {reply, {error, Else}, State}
     end;
 handle_call({read, #handle{location=Location,cookie=Cookie}=Handle, Fun}, _From, #state{fd=Fd}=State) ->
     case read_item_header(Fd, Location) of
         {ok, #item_header{cookie=Cookie,len=Len}} ->
             case stream_out(Fd, Fun, Location + ?ITEM_HEADER_SIZE, Len) of
-                {ok, Sha} ->
-                    Fun(eof),
-                    {reply, ok, State};
+                {ok, CalculatedSha} ->
+                    case read_item_footer(Fd, Location + ?ITEM_HEADER_SIZE + Len) of
+                        {ok, #item_footer{sha=RecordedSha}} ->
+                            case RecordedSha of
+                                CalculatedSha -> Fun({eof, checksum_verified});
+                                _ -> Fun({eof, checksum_failed})
+                            end,
+                            {reply, ok, State};
+                        Else ->
+                            {reply, {error, Else}, State}
+                    end;
                 Else ->
-                    {reply, Else, State}
+                    {reply, {error, Else}, State}
             end;
         {ok, #item_header{cookie=Cookie1}} ->
             {reply, {error, invalid_cookie}, State};
         Else ->
-            Else
+            {reply, {error, Else}, State}
     end;
 handle_call(close, _From, #state{fd=Fd}=State) ->
     {stop, normal, file:close(Fd), State#state{fd=nil}};
@@ -247,6 +256,14 @@ binary_to_item_footer(Bin) ->
             {ok, #item_footer{sha=Sha}};
         _ ->
             {error, invalid_item_footer}
+    end.
+
+read_item_footer(Fd, Location) ->
+    case file:pread(Fd, Location, ?ITEM_FOOTER_SIZE) of
+        {ok, Bin} ->
+            binary_to_item_footer(Bin);
+        Else ->
+            Else
     end.
 
 stream_in(Fd, Fun, Eof) ->
