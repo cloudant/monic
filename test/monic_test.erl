@@ -42,15 +42,10 @@ write_bin() ->
     ?assertEqual(Bin, Bin1).
 
 write_fun() ->
-    Fun = fun(_) ->
-                  case get(next) of
-                      undefined ->
-                          put(next, {ok, <<"foobar">>});
-                      {ok, _} ->
-                          put(next, eof)
-                  end,
-                  get(next) end,
+    {ok, Pid} = monic_fake_stream:start_link([{ok, <<"foobar">>},eof]),
+    Fun = fun(_) -> monic_fake_stream:next(Pid) end,
     {ok, Handle} = monic:write("foo", Fun),
+    monic_fake_stream:close(Pid),
     {ok, Bin1} = monic:read("foo", Handle),
     ?assertEqual(<<"foobar">>, Bin1).
 
