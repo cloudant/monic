@@ -24,6 +24,7 @@ all_test_() ->
       {timeout, 30, fun() -> write_bin() end},
       {timeout, 30, fun() -> write_fun() end},
       {timeout, 30, fun() -> read_fun() end},
+      {timeout, 30, fun() -> delete() end},
       {timeout, 30, fun() -> range_read() end},
       {timeout, 30, fun() -> unique_cookies() end},
       {timeout, 30, fun() -> unforgeable_cookie() end},
@@ -63,6 +64,14 @@ read_fun() ->
                   end,
                   put(last, R) end,
     ok = monic:read("foo", Handle, Fun).
+
+delete() ->
+    Bin = <<"hello this is a quick test">>,
+    {ok, Handle} = monic:write("foo", Bin),
+    {ok, Bin1} = monic:read("foo", Handle),
+    ?assertEqual(Bin, Bin1),
+    ?assertEqual(ok, monic:delete("foo", Handle)),
+    ?assertEqual({error, deleted}, monic:read("foo", Handle)).
 
 range_read() ->
     {ok, Handle} = monic:write("foo", <<"foobar">>),

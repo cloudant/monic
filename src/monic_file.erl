@@ -122,6 +122,8 @@ handle_call({read, #handle{uuid=UUID}}, _From, #state{uuid=UUID1}=State) when UU
 %% kill the following clause.
 handle_call({read, #handle{location=Location,cookie=Cookie}}, _From, #state{fd=Fd}=State) ->
     case read_item_header(Fd, Location) of
+        {ok, #item_header{flags=1}} ->
+            {reply, {error, deleted}, State};
         {ok, #item_header{cookie=Cookie,len=Len}} ->
             {reply, file:pread(Fd, Location+?ITEM_HEADER_SIZE, Len), State};
         {ok, #item_header{}} ->
@@ -133,6 +135,8 @@ handle_call({read, Handle, Fun}, From, State) ->
     handle_call({read, Handle, [], Fun}, From, State);
 handle_call({read, #handle{location=Location,cookie=Cookie}, Ranges, Fun}, _From, #state{fd=Fd}=State) ->
     case read_item_header(Fd, Location) of
+        {ok, #item_header{flags=1}} ->
+            {reply, {error, deleted}, State};
         {ok, #item_header{cookie=Cookie,len=Len}} ->
             Ranges1 = case Ranges of
                           [] -> [{0, Len}];
@@ -170,6 +174,19 @@ handle_call({read, #handle{location=Location,cookie=Cookie}, Ranges, Fun}, _From
     end;
 handle_call(close, _From, #state{fd=Fd}=State) ->
     {stop, normal, file:close(Fd), State#state{fd=nil}};
+handle_call({delete, #handle{location=Location,cookie=Cookie}}, _From, #state{fd=Fd}=State) ->
+    case read_item_header(Fd, Location) of
+        {ok, #item_header{cookie=Cookie}=Header} ->
+            Header1 = Header#item_header{flags=1},
+            case file:pwrite(Fd, Location, item_header_to_binary(Header1)) of
+                ok ->
+                    {reply, ok, State};
+                Else ->
+                    {reply, Else, State}
+            end;
+        Else ->
+            {reply, Else, State}
+    end;
 handle_call(uuid, _From, #state{uuid=UUID}=State) ->
     {reply, UUID, State}.
 
