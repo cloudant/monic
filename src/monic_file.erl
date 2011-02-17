@@ -120,16 +120,16 @@ handle_call({write, Fun}, _From, #state{uuid=UUID,eof=Eof,fd=Fd}=State) when is_
 handle_call({read, #handle{uuid=UUID}}, _From, #state{uuid=UUID1}=State) when UUID /= UUID1 ->
     {reply, {error, wrong_file}, State};
 %% kill the following clause.
-handle_call({read, #handle{location=Location,cookie=Cookie}=Handle}, _From, #state{fd=Fd}=State) ->
+handle_call({read, #handle{location=Location,cookie=Cookie}}, _From, #state{fd=Fd}=State) ->
     case read_item_header(Fd, Location) of
         {ok, #item_header{cookie=Cookie,len=Len}} ->
             {reply, file:pread(Fd, Location+?ITEM_HEADER_SIZE, Len), State};
-        {ok, #item_header{cookie=Cookie1}} ->
+        {ok, #item_header{}} ->
             {reply, {error, invalid_cookie}, State};
         Else ->
             {reply, {error, Else}, State}
     end;
-handle_call({read, #handle{location=Location,cookie=Cookie}=Handle, Fun}, _From, #state{fd=Fd}=State) ->
+handle_call({read, #handle{location=Location,cookie=Cookie}, Fun}, _From, #state{fd=Fd}=State) ->
     case read_item_header(Fd, Location) of
         {ok, #item_header{cookie=Cookie,len=Len}} ->
             case stream_out(Fd, Fun, Location + ?ITEM_HEADER_SIZE, Len) of
@@ -147,7 +147,7 @@ handle_call({read, #handle{location=Location,cookie=Cookie}=Handle, Fun}, _From,
                 Else ->
                     {reply, {error, Else}, State}
             end;
-        {ok, #item_header{cookie=Cookie1}} ->
+        {ok, #item_header{}} ->
             {reply, {error, invalid_cookie}, State};
         Else ->
             {reply, {error, Else}, State}
@@ -165,7 +165,7 @@ handle_info(_Info, State) ->
 
 terminate(_Reason, #state{fd=nil}) ->
     ok;
-terminate(Reason, #state{fd=Fd}) ->
+terminate(_Reason, #state{fd=Fd}) ->
     file:close(Fd).
 
 code_change(_OldVsn, State, _Extra) ->
@@ -220,7 +220,7 @@ binary_to_file_header(Bin) ->
 file_header_to_iolist(#file_header{uuid=UUID, eof=Eof}) ->
     Bin = <<?FILE_HEADER_MAGIC:64/integer, ?FILE_HEADER_VERSION:16/integer,
             UUID:16/binary, Eof:64/integer>>,
-    Res = [Bin, <<0:(8*(?FILE_HEADER_SIZE - iolist_size(Bin)))>>].
+    [Bin, <<0:(8*(?FILE_HEADER_SIZE - iolist_size(Bin)))>>].
 
 read_item_header(Fd, Location) ->
     case file:pread(Fd, Location, ?ITEM_HEADER_SIZE) of
@@ -231,10 +231,8 @@ read_item_header(Fd, Location) ->
     end.
 
 item_header_to_binary(#item_header{cookie=Cookie,len=Len,flags=Flags}) ->
-    Res = <<?ITEM_HEADER_MAGIC:64/integer, ?ITEM_HEADER_VERSION:16/integer, Cookie:16/binary,
-            Flags:16/integer, Len:64/integer>>,
-    ?ITEM_HEADER_SIZE = iolist_size(Res),
-    Res.
+    <<?ITEM_HEADER_MAGIC:64/integer, ?ITEM_HEADER_VERSION:16/integer, Cookie:16/binary,
+      Flags:16/integer, Len:64/integer>>.
 
 binary_to_item_header(Bin) ->
     case Bin of
@@ -246,9 +244,7 @@ binary_to_item_header(Bin) ->
     end.
 
 item_footer_to_binary(#item_footer{sha=Sha}) ->
-    Res = <<?ITEM_FOOTER_MAGIC:64/integer, Sha:20/binary>>,
-    ?ITEM_FOOTER_SIZE = iolist_size(Res),
-    Res.
+    <<?ITEM_FOOTER_MAGIC:64/integer, Sha:20/binary>>.
 
 binary_to_item_footer(Bin) ->
     case Bin of
@@ -290,7 +286,7 @@ stream_in(Fd, Fun, Eof, Len, Sha) ->
 stream_out(Fd, Fun, Location, Len) ->
     stream_out(Fd, Fun, Location, Len, crypto:sha_init()).
 
-stream_out(Fd, Fun, Location, 0, Sha) ->
+stream_out(_Fd, _Fun, _Location, 0, Sha) ->
     {ok, crypto:sha_final(Sha)};
 stream_out(Fd, Fun, Location, Remaining, Sha) when Remaining > 0 ->
     case file:pread(Fd, Location, min(Remaining, ?BUFFER_SIZE)) of
