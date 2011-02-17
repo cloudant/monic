@@ -33,7 +33,7 @@
 -define(ITEM_HEADER_SIZE, 36).
 -define(ITEM_HEADER_MAGIC, 2998602972810243711).
 
--record(item_footer, {checksum}).
+-record(item_footer, {sha}).
 -define(ITEM_FOOTER_SIZE, 28).
 -define(ITEM_FOOTER_MAGIC, 15866124023828541222).
 
@@ -93,13 +93,20 @@ handle_call({write, Fun}, _From, #state{uuid=UUID,eof=Eof,fd=Fd}=State) when is_
         {ok, Eof1, Len, Sha} ->
             Cookie = crypto:rand_bytes(16),
             Header = #item_header{cookie=Cookie, len=Len},
+            Footer = #item_footer{sha=Sha},
             case file:pwrite(Fd, Eof, item_header_to_binary(Header)) of
                 ok ->
-                    case file:datasync(Fd) of
+                    case file:pwrite(Fd, Eof1, item_footer_to_binary(Footer)) of
                         ok ->
-                            Handle = #handle{location=Eof, uuid=UUID, cookie=Cookie},
-                            write_file_header(Fd, #file_header{uuid=UUID, eof=Eof1}),
-                            {reply, {ok, Handle}, State#state{eof=Eof1}};
+                            Eof2 = Eof1 + ?ITEM_FOOTER_SIZE,
+                            case file:datasync(Fd) of
+                                ok ->
+                                    Handle = #handle{location=Eof, uuid=UUID, cookie=Cookie},
+                                    write_file_header(Fd, #file_header{uuid=UUID, eof=Eof2}),
+                                {reply, {ok, Handle}, State#state{eof=Eof2}};
+                                Else ->
+                                    {reply, Else, State}
+                            end;
                         Else ->
                             {reply, Else, State}
                     end;
@@ -215,8 +222,10 @@ read_item_header(Fd, Location) ->
     end.
 
 item_header_to_binary(#item_header{cookie=Cookie,len=Len,flags=Flags}) ->
-    <<?ITEM_HEADER_MAGIC:64/integer, ?ITEM_HEADER_VERSION:16/integer, Cookie:16/binary,
-      Flags:16/integer, Len:64/integer>>.
+    Res = <<?ITEM_HEADER_MAGIC:64/integer, ?ITEM_HEADER_VERSION:16/integer, Cookie:16/binary,
+            Flags:16/integer, Len:64/integer>>,
+    ?ITEM_HEADER_SIZE = iolist_size(Res),
+    Res.
 
 binary_to_item_header(Bin) ->
     case Bin of
@@ -225,6 +234,19 @@ binary_to_item_header(Bin) ->
             {ok, #item_header{cookie=Cookie,len=Len,flags=Flags}};
         _ ->
             {error, invalid_item_header}
+    end.
+
+item_footer_to_binary(#item_footer{sha=Sha}) ->
+    Res = <<?ITEM_FOOTER_MAGIC:64/integer, Sha:20/binary>>,
+    ?ITEM_FOOTER_SIZE = iolist_size(Res),
+    Res.
+
+binary_to_item_footer(Bin) ->
+    case Bin of
+        <<?ITEM_FOOTER_MAGIC:64/integer,Sha:20/binary>> ->
+            {ok, #item_footer{sha=Sha}};
+        _ ->
+            {error, invalid_item_footer}
     end.
 
 stream_in(Fd, Fun, Eof) ->
