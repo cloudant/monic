@@ -56,7 +56,9 @@ read_fun() ->
                       undefined ->
                           ?assertEqual({ok, <<"foobar">>}, R);
                       {ok, <<"foobar">>} ->
-                          ?assertEqual({eof, checksum_verified}, R)
+                          ?assertEqual({checksum, valid}, R);
+                      {checksum, valid} ->
+                          ?assertEqual(eof, R)
                   end,
                   put(last, R) end,
     ok = monic:read("foo", Handle, Fun).

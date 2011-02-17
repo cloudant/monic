@@ -137,9 +137,10 @@ handle_call({read, #handle{location=Location,cookie=Cookie}, Fun}, _From, #state
                     case read_item_footer(Fd, Location + ?ITEM_HEADER_SIZE + Len) of
                         {ok, #item_footer{sha=RecordedSha}} ->
                             case RecordedSha of
-                                CalculatedSha -> Fun({eof, checksum_verified});
-                                _ -> Fun({eof, checksum_failed})
+                                CalculatedSha -> Fun({checksum, valid});
+                                _ -> Fun({checksum, invalid})
                             end,
+                            Fun(eof),
                             {reply, ok, State};
                         Else ->
                             {reply, {error, Else}, State}
