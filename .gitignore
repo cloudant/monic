@@ -2,3 +2,5 @@ ebin
 doc
 .eunit
 *~
+deps
+priv/log
