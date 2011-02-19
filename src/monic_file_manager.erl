@@ -25,32 +25,34 @@ content_types_provided(ReqData, Context) ->
     {[{"application/json", to_json}], ReqData, Context}.
     
 delete_resource(ReqData, Context) ->
-    case file:delete(path(ReqData)) of
+    case file:delete(path(ReqData, Context)) of
         ok ->
             {true, ReqData, Context};
         _ ->
             {false, ReqData, Context}
     end.
 
-init([]) ->
-    {ok, undefined}.
+init(ConfigProps) ->
+    {ok, ConfigProps}.
 
 is_conflict(ReqData, Context) ->  
-    {exists(ReqData), ReqData, Context}.
+    {exists(ReqData, Context), ReqData, Context}.
 
 resource_exists(ReqData, Context) ->    
-    {exists(ReqData), ReqData, Context}.
+    {exists(ReqData, Context), ReqData, Context}.
 
 from_json(ReqData, Context) ->
-    ok = file:write_file(path(ReqData), <<>>, [exclusive]),
+    ok = file:write_file(path(ReqData, Context), <<>>, [exclusive]),
     {true, ReqData, Context}.
     
 to_json(ReqData, Context) ->
     {"{\"ok\": true}", ReqData, Context}.
 
-path(ReqData) ->
-    wrq:path_info(file, ReqData).
+path(ReqData, Context) ->
+    Root = proplists:get_value(root, Context, "tmp"),
+    File = wrq:path_info(file, ReqData),
+    filename:join(Root, File).
 
-exists(ReqData) ->
-    filelib:is_file(path(ReqData)).
+exists(ReqData, Context) ->
+    filelib:is_file(path(ReqData, Context)).
 
