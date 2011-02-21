@@ -12,20 +12,13 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
-%%-*- mode: erlang -*-
-{application, monic,
- [
-  {description, "monic"},
-  {vsn, "1"},
-  {modules, []},
-  {registered, []},
-  {applications, [
-                  kernel,
-                  stdlib,
-                  crypto,
-                  mochiweb,
-                  webmachine
-                 ]},
-  {mod, { monic_app, []}},
-  {env, []}
- ]}.
+-module(monic_utils).
+-export([path/2, exists/2]).
+
+path(ReqData, Context) ->
+    Root = proplists:get_value(root, Context, "tmp"),
+    File = wrq:path_info(file, ReqData),
+    filename:join(Root, File).
+
+exists(ReqData, Context) ->
+    filelib:is_file(path(ReqData, Context)).

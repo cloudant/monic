@@ -12,7 +12,7 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
--module(monic_file_manager).
+-module(monic_file_resource).
 -export([init/1,
     allowed_methods/2,
     content_types_accepted/2,
@@ -20,8 +20,9 @@
     delete_resource/2,
     is_conflict/2,
     resource_exists/2]).
-    
+
 -export([from_json/2, to_json/2]).
+-import(monic_utils, [path/2, exists/2]).
 
 -include_lib("webmachine/include/webmachine.hrl").
 
@@ -30,10 +31,10 @@ allowed_methods(ReqData, Context) ->
 
 content_types_accepted(ReqData, Context) ->
     {[{"application/json", from_json}], ReqData, Context}.
-    
+
 content_types_provided(ReqData, Context) ->
     {[{"application/json", to_json}], ReqData, Context}.
-    
+
 delete_resource(ReqData, Context) ->
     case file:delete(path(ReqData, Context)) of
         ok ->
@@ -45,24 +46,16 @@ delete_resource(ReqData, Context) ->
 init(ConfigProps) ->
     {ok, ConfigProps}.
 
-is_conflict(ReqData, Context) ->  
+is_conflict(ReqData, Context) ->
     {exists(ReqData, Context), ReqData, Context}.
 
-resource_exists(ReqData, Context) ->    
+resource_exists(ReqData, Context) ->
     {exists(ReqData, Context), ReqData, Context}.
 
 from_json(ReqData, Context) ->
     ok = file:write_file(path(ReqData, Context), <<>>, [exclusive]),
     {true, ReqData, Context}.
-    
+ 
 to_json(ReqData, Context) ->
     {"{\"ok\": true}", ReqData, Context}.
-
-path(ReqData, Context) ->
-    Root = proplists:get_value(root, Context, "tmp"),
-    File = wrq:path_info(file, ReqData),
-    filename:join(Root, File).
-
-exists(ReqData, Context) ->
-    filelib:is_file(path(ReqData, Context)).
 
