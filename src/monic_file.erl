@@ -16,9 +16,10 @@
 
 -export([load/1, add/2]).
 
--define(HEADER_SIZE, 20).
--define(FOOTER_SIZE, 24).
--define(INDEX_SIZE, 24).
+-define(ITEM_INDEX_SIZE, 28).
+-define(ITEM_HEADER_SIZE, 24).
+-define(ITEM_FOOTER_SIZE, 24).
+-define(ONE_MILLION, 1000000).
 
 load(Path) ->
     Tid = ets:new(index, []),
@@ -43,10 +44,10 @@ load_index(Tid, Path) ->
     end.
 
 load_index_items(Tid, Fd, LastLocation) ->
-    case file:read(Fd, 24) of
-        {ok, <<Key:64/integer, Deleted:1, Location:64/integer, Size:63/integer>>} ->
+    case file:read(Fd, ?ITEM_INDEX_SIZE) of
+        {ok, <<Key:64/integer, Location:64/integer, Size:64/integer, Version:16/integer, Deleted:1, _:15>>} ->
             case Deleted of
-                0 -> ets:insert(Tid, {Key, Location, Size});
+                0 -> ets:insert(Tid, {Key, Location, Size, LastModified});
                 1 -> ok
             end,
             load_index_items(Tid, Fd, Location);
@@ -67,13 +68,13 @@ load_main(Tid, Path, LastLocation) ->
     end.
 
 load_main_items(Tid, Fd, Location) ->
-    case file:pread(Fd, Location, ?HEADER_SIZE) of
-        {ok, <<Key:64/integer, _Cookie:4/binary, Deleted:1, Size:63/integer>>} ->
+    case file:pread(Fd, Location, ?ITEM_HEADER_SIZE) of
+        {ok, <<Key:64/integer, _Cookie:32/integer, Size:64/integer, Version:16/integer,  Deleted:1, _:15>>} ->
             case Deleted of
-                0 -> ets:insert(Tid, {Key, Location, Size});
+                0 -> ets:insert(Tid, {Key, Location, Size, Version});
                 1 -> ok
             end,
-            load_main_items(Tid, Fd, Location + Size + ?HEADER_SIZE + ?FOOTER_SIZE);
+            load_main_items(Tid, Fd, Location + Size + ?ITEM_HEADER_SIZE + ?ITEM_FOOTER_SIZE);
         eof ->
             ok;
         Else ->
@@ -98,3 +99,7 @@ add_bin(Fd, Bin) ->
     ok = file:write(Fd, <<Key:64/integer, Cookie/binary, 0:1, Size:63/integer>>),
     ok = file:write(Fd, Bin),
     {ok, Key, Cookie}.
+
+instant() ->
+    {MegaSecs, Secs, _} = now(),
+    (MegaSecs * ?ONE_MILLION * ?ONE_MILLION) + (Secs * 1000).
