@@ -1,0 +1,6 @@
+Request             Responses
+PUT /file           201 or 409
+DELETE /file        200 or 404
+POST /file          201 (+ Location) or error
+GET /file/key       200 or 304 or 404
+DELETE /file/key    200 or 404
