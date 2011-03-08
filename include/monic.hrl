@@ -1,5 +1,5 @@
 -define(INDEX_SIZE, 28).
--define(HEADER_SIZE, 25).
+-define(HEADER_SIZE, 28).
 -define(FOOTER_SIZE, 24).
 
 -record(index, {

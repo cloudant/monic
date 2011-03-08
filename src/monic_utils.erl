@@ -33,13 +33,13 @@ exists(ReqData, Context) ->
 
 pwrite_header(Fd, Location, #header{key=Key,cookie=Cookie,size=Size,
     version=Version,flags=Flags}) ->
-    Bin = <<?ITEM_HEADER_MAGIC:8/integer, Key:64/integer, Cookie:32/integer,
+    Bin = <<?ITEM_HEADER_MAGIC:32/integer, Key:64/integer, Cookie:32/integer,
         Size:64/integer, Version:16/integer, Flags:16/integer>>,
     file:pwrite(Fd, Location, Bin).
 
 pread_header(Fd, Location) ->
     case file:pread(Fd, Location, ?HEADER_SIZE) of
-        {ok, <<?ITEM_HEADER_MAGIC:8/integer, Key:64/integer, Cookie:32/integer,
+        {ok, <<?ITEM_HEADER_MAGIC:32/integer, Key:64/integer, Cookie:32/integer,
             Size:64/integer, Version:16/integer, Flags:16/integer>>} ->
             {ok, #header{key=Key,cookie=Cookie,size=Size,version=Version,flags=Flags}};
         {ok, _} ->
@@ -49,12 +49,12 @@ pread_header(Fd, Location) ->
     end.
 
 pwrite_footer(Fd, Location, #footer{sha=Sha}) ->
-    Bin = <<?ITEM_FOOTER_MAGIC:8/integer, Sha:20/binary>>,
+    Bin = <<?ITEM_FOOTER_MAGIC:32/integer, Sha:20/binary>>,
     file:pwrite(Fd, Location, Bin).
 
 pread_footer(Fd, Location) ->
     case file:pread(Fd, Location, ?FOOTER_SIZE) of
-        {ok, <<?ITEM_FOOTER_MAGIC:8/integer, Sha:20/binary>>} ->
+        {ok, <<?ITEM_FOOTER_MAGIC:32/integer, Sha:20/binary>>} ->
             {ok, #footer{sha=Sha}};
         {ok, _} ->
             {error, invalid_footer};
