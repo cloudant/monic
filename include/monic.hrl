@@ -21,8 +21,3 @@
 -record(footer, {
     sha
 }).
-
--record(hints, {
-    next_id,
-    next_location
-}).
