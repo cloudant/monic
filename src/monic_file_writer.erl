@@ -161,7 +161,8 @@ copy_in(Fd, Fun, Location, Remaining, Sha) ->
                 true ->                    
                     case file:pwrite(Fd, Location, Bin) of
                         ok ->
-                            copy_in(Fd, Fd, Fun, Location + Size,
+                            copy_in(Fd, Fun, Location + Size,
+                                Remaining - Size,
                                 crypto:sha_update(Sha, Bin));
                         Else ->
                             Else
