@@ -12,7 +12,7 @@
 %% License for the specific language governing permissions and limitations under
 %% the License.
 
--module(monic_file_writer_test).
+-module(monic_file_test).
 -include("monic.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
@@ -21,22 +21,26 @@ all_test_() ->
     fun setup/0,
     fun cleanup/1,
     [fun write/1,
+    fun write_read/1,
     fun overflow/1
     ]}.
 
 setup() ->
     file:delete("foo.monic"),
     file:delete("foo.monic.idx"),
-    {ok, Pid} = monic_file_writer:open("foo.monic"),
+    {ok, Pid} = monic_file:open("foo.monic"),
     Pid.
 
 cleanup(Pid) ->
-    monic_file_writer:close(Pid).
+    monic_file:close(Pid).
 
 write(Pid) ->
-    Res = monic_file_writer:write(Pid, 3, fun(_Max) -> {ok, <<"123">>} end),
-    ?_assertMatch({ok, 0, _}, Res).
+    ?_assertMatch({ok, 0, _}, monic_file:write(Pid, 3, fun(_Max) -> {ok, <<"123">>} end)).
+
+write_read(Pid) ->
+    {ok, Key, Cookie} = monic_file:write(Pid, 3, fun(_Max) -> {ok, <<"123">>} end),
+    ?_assertEqual(ok, monic_file:read(Pid, Key, Cookie, fun(_) -> ok end)).
 
 overflow(Pid) ->
-    Res = monic_file_writer:write(Pid, 3, fun(_Max) -> {ok, <<"1234">>} end),
+    Res = monic_file:write(Pid, 3, fun(_Max) -> {ok, <<"1234">>} end),
     ?_assertEqual({error, overflow}, Res).

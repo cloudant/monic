@@ -12,7 +12,7 @@
 %% License for the specific language governing permissions and limitations under
 %% the License.
 
--module(monic_file_writer).
+-module(monic_file).
 -behavior(gen_server).
 -include("monic.hrl").
 
@@ -27,7 +27,7 @@
 -define(BUFFER_SIZE, 16384).
 
 %% public API
--export([open/1, write/3, close/1]).
+-export([open/1, write/3, read/4, close/1]).
 
 %% gen_server API
 -export([init/1, terminate/2, code_change/3,handle_call/3, handle_cast/2, handle_info/2]).
@@ -39,6 +39,9 @@ open(Path) ->
 
 write(Pid, Size, Fun) ->
     gen_server:call(Pid, {write, Size, Fun}, infinity).
+
+read(Pid, Key, Cookie, Fun) ->
+    gen_server:call(Pid, {read, Key, Cookie, Fun}, infinity).
 
 close(Pid) ->
     gen_server:call(Pid, close, infinity).
@@ -65,6 +68,21 @@ init(Path) ->
             {stop, Else}
     end.
 
+handle_call({read, Key, Cookie, Fun}, _From, #state{tid=Tid, main_fd=Fd}=State) ->
+    case ets:lookup(Tid, Key) of
+        [{Key, Location, Size, _}] ->
+            case monic_utils:pread_header(Fd, Location) of
+                {ok, #header{cookie=Cookie,size=Size}} ->
+                    copy_out(Fd, Fun, Location + ?HEADER_SIZE, Size),
+                    {reply, ok, State};
+                {ok, _} ->
+                    {reply, {error, wrong_cookie}, State};
+                Else ->
+                    {reply, Else, State}
+            end;
+        [] ->
+            {reply, not_found, State}
+    end;
 handle_call({write, Size, Fun}, _From, #state{main_fd=Fd,next_location=NextLocation}=State) ->
     case new_item(Size, Fun, State) of
         {ok, Key, Cookie} ->
@@ -205,6 +223,18 @@ copy_in(Fd, Fun, Location, Remaining, Sha) ->
                 false ->
                     {error, overflow}
             end;
+        Else ->
+            Else
+    end.
+
+copy_out(_Fd, _Fun, _Location, 0) ->
+    ok;
+copy_out(Fd, Fun, Location, Remaining) ->
+    case file:pread(Fd, Location, min(Remaining, ?BUFFER_SIZE)) of
+        {ok, Bin} ->
+            Size = iolist_size(Bin),
+            Fun({ok, Bin}),
+            copy_out(Fd, Fun, Location + Size, Remaining - Size);
         Else ->
             Else
     end.
