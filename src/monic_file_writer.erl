@@ -123,8 +123,11 @@ load_main_items(Tid, Fd, Location) ->
             Else
     end.
 
-update_item(Tid, Fd, Location, Key, Cookie, Size, Fun) ->    
-    Version = ets:update_counter(Tid, Key, {4, 1, 65535, 1}),
+update_item(Tid, Fd, Location, Key, Cookie, Size, Fun) ->
+    Version = case ets:lookup(Tid, Key) of
+        [] -> 1;
+        [V] -> V + 1
+    end,
     Header = #header{key=Key,cookie=Cookie,size=Size,version=Version, flags=0},
     case monic_utils:pwrite_header(Fd, Location, Header) of
         ok ->
