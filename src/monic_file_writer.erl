@@ -136,6 +136,7 @@ update_item(Tid, Fd, Location, Key, Cookie, Size, Fun) ->
                     Footer = #footer{sha=Sha},
                     case monic_utils:pwrite_footer(Fd, Location + ?HEADER_SIZE + Size, Footer) of
                         ok ->
+                            ets:insert(Tid, {Key, Location, Size, Version}),
                             {ok, Location + ?HEADER_SIZE + Size + ?FOOTER_SIZE};
                         Else ->
                             Else
