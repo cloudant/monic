@@ -17,10 +17,13 @@
 -include_lib("eunit/include/eunit.hrl").
 
 all_test_() ->
-    {setup,
+    {foreach,
     fun setup/0,
     fun cleanup/1,
-    fun instantiate/1
+    [
+    fun write/1,
+    fun overflow/1
+    ]
     }.
 
 setup() ->
@@ -32,10 +35,10 @@ setup() ->
 cleanup(Pid) ->
     monic_file_writer:close(Pid).
 
-instantiate(Pid) ->
-    [write(Pid)].
-
 write(Pid) ->
     Res = monic_file_writer:write(Pid, 1, 2, 3, fun(_Max) -> {ok, <<"123">>} end),
     ?_assertEqual(ok, Res).
 
+overflow(Pid) ->
+    Res = monic_file_writer:write(Pid, 1, 2, 3, fun(_Max) -> {ok, <<"1234">>} end),
+    ?_assertEqual({error, overflow}, Res).
