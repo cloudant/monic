@@ -126,6 +126,7 @@ load_main_items(Tid, Fd, Location) ->
 update_item(Tid, Fd, Location, Key, Cookie, Size, Fun) ->
     Version = case ets:lookup(Tid, Key) of
         [] -> 1;
+        [65535] -> 1;
         [V] -> V + 1
     end,
     Header = #header{key=Key,cookie=Cookie,size=Size,version=Version, flags=0},
