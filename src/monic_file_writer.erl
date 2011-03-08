@@ -17,7 +17,7 @@
 -include("monic.hrl").
 
 -record(state, {
-    tid,
+    tid=nil,
     index_fd=nil,
     main_fd=nil,
     eof
@@ -41,16 +41,16 @@ write(Pid, Key, Cookie, Size, Fun) ->
 
 close(Pid) ->
     gen_server:call(Pid, close, infinity).
-    
+
 %% gen_server functions
 
 init(Path) ->
-    Tid = ets:new(index, []),
+    Tid = ets:new(index, [set, private]),
     case load_index(Tid, Path) of
         {ok, IndexFd, Hint} ->
             case load_main(Tid, Path, Hint) of
                 {ok, MainFd, Eof} ->
-                    {ok, #state{index_fd=IndexFd,main_fd=MainFd,eof=Eof}};
+                    {ok, #state{tid=Tid,index_fd=IndexFd,main_fd=MainFd,eof=Eof}};
                 Else ->
                     {stop, Else}
             end;
@@ -63,11 +63,12 @@ handle_call({write, Key, Cookie, Size, Fun}, _From, #state{main_fd=Fd,eof=Eof}=S
         {ok, Eof1} ->
             {reply, ok, State#state{eof=Eof1}};
         Else ->
-            file:truncate(Fd, Eof),
+            file:position(Fd, Eof),
+            file:truncate(Fd),
             {reply, Else, State}
     end;
-handle_call(close, _From, #state{index_fd=IndexFd,main_fd=MainFd}=State) ->
-    {stop, normal, close_files([IndexFd, MainFd]), State#state{index_fd=nil,main_fd=nil}}.
+handle_call(close, _From, State) ->
+    {stop, normal, ok, cleanup(State)}.
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -75,8 +76,8 @@ handle_cast(_Msg, State) ->
 handle_info(_Info, State) ->
     {noreply, State}.
 
-terminate(_Reason, #state{index_fd=IndexFd,main_fd=MainFd}) ->
-    close_files([IndexFd, MainFd]).
+terminate(_Reason, State) ->
+    cleanup(State).
 
 code_change(_OldVsn, State, _Extra) ->
   {ok, State}.
@@ -86,7 +87,12 @@ code_change(_OldVsn, State, _Extra) ->
 load_index(Tid, Path) ->
     case file:open(Path ++ ".idx", [binary, raw, read, write, append]) of
         {ok, Fd} ->
-            {ok, Fd, load_index_items(Tid, Fd, 0)};
+            case load_index_items(Tid, Fd, 0) of
+                {ok, Hint} ->
+                    {ok, Fd, Hint};
+                Else ->
+                    Else
+            end;
         Else ->
             Else
     end.
@@ -108,7 +114,12 @@ load_index_items(Tid, Fd, Hint) ->
 load_main(Tid, Path, Hint) ->
     case file:open(Path, [binary, raw, read, write]) of
         {ok, Fd} ->
-            {ok, Fd, load_main_items(Tid, Fd, Hint)};
+            case load_main_items(Tid, Fd, Hint) of
+                {ok, Eof} ->
+                    {ok, Fd, Eof};
+                Else ->
+                    Else
+            end;
         Else ->
             Else
     end.
@@ -187,11 +198,19 @@ copy_in(Fd, Fun, Location, Remaining, Sha) ->
             Else
     end.
 
-close_files([]) ->
+cleanup(#state{tid=Tid,index_fd=IndexFd,main_fd=MainFd}=State) ->
+    close_int(IndexFd),
+    close_int(MainFd),
+    close_ets(Tid),
+    State#state{tid=nil,index_fd=nil,main_fd=nil}.
+    
+close_int(nil) ->
     ok;
-close_files([nil|T]) ->
-    close_files(T);
-close_files([Fd|T]) ->
-    file:close(Fd),
-    close(T).
+close_int(Fd) ->
+    file:close(Fd).
+
+close_ets(nil) ->
+    ok;
+close_ets(Tid) ->
+    ets:delete(Tid).
 
