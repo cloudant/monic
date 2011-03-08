@@ -34,9 +34,9 @@ cleanup(Pid) ->
     monic_file_writer:close(Pid).
 
 write(Pid) ->
-    Res = monic_file_writer:write(Pid, 1, 2, 3, fun(_Max) -> {ok, <<"123">>} end),
-    ?_assertEqual(ok, Res).
+    Res = monic_file_writer:write(Pid, 3, fun(_Max) -> {ok, <<"123">>} end),
+    ?_assertMatch({ok, 0, _}, Res).
 
 overflow(Pid) ->
-    Res = monic_file_writer:write(Pid, 1, 2, 3, fun(_Max) -> {ok, <<"1234">>} end),
+    Res = monic_file_writer:write(Pid, 3, fun(_Max) -> {ok, <<"1234">>} end),
     ?_assertEqual({error, overflow}, Res).

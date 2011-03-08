@@ -17,6 +17,7 @@
 -export([pread_header/2, pwrite_header/3]).
 -export([pread_footer/2, pwrite_footer/3]).
 -export([read_index/1, write_index/2]).
+-export([new_cookie/0]).
 
 -include("monic.hrl").
 
@@ -78,3 +79,6 @@ read_index(Fd) ->
         Else ->
             Else
     end.
+
+new_cookie() ->
+    crypto:rand_uniform(0, 1 bsl 32).

@@ -17,16 +17,17 @@
 -include("monic.hrl").
 
 -record(state, {
-    tid=nil,
+    next_location=0,
     index_fd=nil,
     main_fd=nil,
-    eof
+    next_key=0,
+    tid=nil
 }).
 
 -define(BUFFER_SIZE, 16384).
 
 %% public API
--export([open/1, write/5, close/1]).
+-export([open/1, write/3, close/1]).
 
 %% gen_server API
 -export([init/1, terminate/2, code_change/3,handle_call/3, handle_cast/2, handle_info/2]).
@@ -36,8 +37,8 @@
 open(Path) ->
     gen_server:start_link({local, list_to_atom(Path)}, ?MODULE, Path, []).
 
-write(Pid, Key, Cookie, Size, Fun) ->
-    gen_server:call(Pid, {write, Key, Cookie, Size, Fun}, infinity).
+write(Pid, Size, Fun) ->
+    gen_server:call(Pid, {write, Size, Fun}, infinity).
 
 close(Pid) ->
     gen_server:call(Pid, close, infinity).
@@ -47,10 +48,16 @@ close(Pid) ->
 init(Path) ->
     Tid = ets:new(index, [set, private]),
     case load_index(Tid, Path) of
-        {ok, IndexFd, Hint} ->
-            case load_main(Tid, Path, Hint) of
-                {ok, MainFd, Eof} ->
-                    {ok, #state{tid=Tid,index_fd=IndexFd,main_fd=MainFd,eof=Eof}};
+        {ok, IndexFd, Hints} ->
+            case load_main(Tid, Path, Hints) of
+                {ok, MainFd, {NextKey, NextLocation}} ->
+                    {ok, #state{
+                        index_fd=IndexFd,
+                        main_fd=MainFd,
+                        next_key=NextKey,
+                        next_location=NextLocation,
+                        tid=Tid
+                    }};
                 Else ->
                     {stop, Else}
             end;
@@ -58,12 +65,15 @@ init(Path) ->
             {stop, Else}
     end.
 
-handle_call({write, Key, Cookie, Size, Fun}, _From, #state{main_fd=Fd,eof=Eof}=State) ->
-    case update_item(Key, Cookie, Size, Fun, State) of
-        {ok, Eof1} ->
-            {reply, ok, State#state{eof=Eof1}};
+handle_call({write, Size, Fun}, _From, #state{main_fd=Fd,next_location=NextLocation}=State) ->
+    case new_item(Size, Fun, State) of
+        {ok, Key, Cookie} ->
+            {reply, {ok, Key, Cookie}, State#state{
+                next_key = Key + 1,
+                next_location = NextLocation + Size + ?HEADER_SIZE + ?FOOTER_SIZE
+            }};
         Else ->
-            file:position(Fd, Eof),
+            file:position(Fd, NextLocation),
             file:truncate(Fd),
             {reply, Else, State}
     end;
@@ -87,9 +97,9 @@ code_change(_OldVsn, State, _Extra) ->
 load_index(Tid, Path) ->
     case file:open(Path ++ ".idx", [binary, raw, read, write, append]) of
         {ok, Fd} ->
-            case load_index_items(Tid, Fd, 0) of
-                {ok, Hint} ->
-                    {ok, Fd, Hint};
+            case load_index_items(Tid, Fd) of
+                {ok, Hints} ->
+                    {ok, Fd, Hints};
                 Else ->
                     Else
             end;
@@ -97,26 +107,29 @@ load_index(Tid, Path) ->
             Else
     end.
 
-load_index_items(Tid, Fd, Hint) ->
+load_index_items(Tid, Fd) ->
+    load_index_items(Tid, Fd, {0, 0}).
+
+load_index_items(Tid, Fd, Hints) ->
     case monic_utils:read_index(Fd) of
         {ok, #index{key=Key,location=Location,size=Size,version=Version,flags= <<Deleted:1,_:15>>}} ->
             case Deleted of
                 0 -> ets:insert(Tid, {Key, Location, Size, Version});
                 1 -> ets:delete(Tid, Key)
             end,
-            load_index_items(Tid, Fd, Location);
+            load_index_items(Tid, Fd, {Key + 1, Location + Size + ?HEADER_SIZE + ?FOOTER_SIZE});
         eof ->
-            {ok, Hint};
+            {ok, Hints};
         Else ->
             Else
     end.
 
-load_main(Tid, Path, Hint) ->
+load_main(Tid, Path, Hints) ->
     case file:open(Path, [binary, raw, read, write]) of
         {ok, Fd} ->
-            case load_main_items(Tid, Fd, Hint) of
-                {ok, Eof} ->
-                    {ok, Fd, Eof};
+            case load_main_items(Tid, Fd, Hints) of
+                {ok, Hints} ->
+                    {ok, Fd, Hints};
                 Else ->
                     Else
             end;
@@ -124,27 +137,25 @@ load_main(Tid, Path, Hint) ->
             Else
     end.
 
-load_main_items(Tid, Fd, Location) ->
+load_main_items(Tid, Fd, {_, Location}=Hints) ->
     case monic_utils:pread_header(Fd, Location) of
         {ok, #header{key=Key,cookie=_Cookie,size=Size,version=Version,flags= <<Deleted:1,_:15>>}} ->
             case Deleted of
                 0 -> ets:insert(Tid, {Key, Location, Size, Version});
                 1 -> ets:delete(Tid, Key)
             end,
-            load_main_items(Tid, Fd, Location + Size + ?HEADER_SIZE + ?FOOTER_SIZE);
+            load_main_items(Tid, Fd, {Key + 1, Location + Size + ?HEADER_SIZE + ?FOOTER_SIZE});
         eof ->
-            {ok, Location};
+            {ok, Hints};
         Else ->
             Else
     end.
 
-update_item(Key, Cookie, Size, Fun, #state{tid=Tid,index_fd=IndexFd,main_fd=MainFd,eof=Location}) ->
-    Version = case ets:lookup(Tid, Key) of
-        [] -> 1;
-        [65535] -> 1;
-        [V] -> V + 1
-    end,
-    Header = #header{key=Key,cookie=Cookie,size=Size,version=Version, flags=0},
+new_item(Size, Fun, #state{tid=Tid, index_fd=IndexFd, main_fd=MainFd,
+    next_key=Key, next_location=Location}) ->
+    Cookie = monic_utils:new_cookie(),
+    Version = 1,
+    Header = #header{key=Key, cookie=Cookie, size=Size, version=Version, flags=0},
     case monic_utils:pwrite_header(MainFd, Location, Header) of
         ok ->
             case copy_in(MainFd, Fun, Location + ?HEADER_SIZE, Size) of
@@ -158,7 +169,7 @@ update_item(Key, Cookie, Size, Fun, #state{tid=Tid,index_fd=IndexFd,main_fd=Main
                                     #index{key=Key,location=Location,size=Size,version=Version,flags=0}
                                     ),
                                     ets:insert(Tid, {Key, Location, Size, Version}),
-                                    {ok, Location + ?HEADER_SIZE + Size + ?FOOTER_SIZE};
+                                    {ok, Key, Cookie};
                                 Else ->
                                     Else
                             end;
