@@ -17,3 +17,6 @@ distclean: clean
 
 docs:
 	@erl -noshell -run edoc_run application '$(APP)' '"."' '[]'
+
+test: all
+	@(./rebar skip_deps=true eunit)
