@@ -20,11 +20,9 @@ all_test_() ->
     {foreach,
     fun setup/0,
     fun cleanup/1,
-    [
-    fun write/1,
+    [fun write/1,
     fun overflow/1
-    ]
-    }.
+    ]}.
 
 setup() ->
     file:delete("foo.monic"),
