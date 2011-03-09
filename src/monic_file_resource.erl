@@ -47,18 +47,14 @@ content_types_provided(ReqData, Context) ->
     {[{"application/json", show_file}], ReqData, Context}.
 
 create_path(ReqData, Context) ->
-    File = wrq:path_info(file, ReqData),
-    Key = 1, %% TODO increment.
-    Cookie = crypto:rand_uniform(1, 1 bsl 32),
-    {io_lib:format("/~s/~B/~B", [File, Key, Cookie]), ReqData, Context}.
+    {"ignored", ReqData, Context}.
 
 delete_resource(ReqData, Context) ->
-    case file:delete(monic_utils:path(ReqData, Context)) of
-        ok ->
-            {true, ReqData, Context};
-        _ ->
-            {false, ReqData, Context}
-    end.
+    Result = case file:delete(monic_utils:path(ReqData, Context)) of
+        ok -> true;
+        _ -> false
+    end,
+    {Result, ReqData, Context}.
 
 init(ConfigProps) ->
     {ok, ConfigProps}.
@@ -93,6 +89,7 @@ create_file(ReqData, Context) ->
     end.
 
 add_item(ReqData, Context) ->
+    erlang:display({disp, wrq:disp_path(ReqData)}),
     case monic_file:open(monic_utils:path(ReqData, Context)) of
         {ok, Pid} ->
             try
@@ -100,7 +97,10 @@ add_item(ReqData, Context) ->
                 StreamBody = wrq:stream_req_body(ReqData, ?BUFFER_SIZE),
                 case monic_file:add(Pid, Size, StreamBody) of
                     {ok, Key, Cookie} ->
-                        {true, ReqData, Context};
+                        File = wrq:path_info(file, ReqData),
+                        Location = io_lib:format("/~s/~B/~B",[File, Key, Cookie]),
+                        ReqData1 = wrq:set_resp_header("Location", Location, ReqData),
+                        {true, ReqData1, Context};
                     _ ->
                         {false, ReqData, Context}
                 end

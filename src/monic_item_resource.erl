@@ -16,9 +16,7 @@
 -export([init/1,
     allowed_methods/2,
     content_types_provided/2,
-    create_path/2,
     delete_resource/2,
-    post_is_create/2,
     resource_exists/2]).
 
 allowed_methods(ReqData, Context) ->
@@ -27,17 +25,11 @@ allowed_methods(ReqData, Context) ->
 content_types_provided(ReqData, Context) ->
     {[{"application/octet-stream", to_binary}], ReqData, Context}.
 
-create_path(ReqData, Context) ->
-    {"/fixme", ReqData, Context}.
-
 delete_resource(ReqData, Context) ->
     {false, ReqData, Context}.
 
 init(ConfigProps) ->
     {ok, ConfigProps}.
-
-post_is_create(ReqData, Context) ->
-    {true, ReqData, Context}.
 
 resource_exists(ReqData, Context) ->
     {true, ReqData, Context}.
