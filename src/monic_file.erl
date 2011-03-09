@@ -172,8 +172,9 @@ load_main_items(Tid, Fd, {_, Location}=Hints) ->
 add_item(Size, Fun, #state{tid=Tid, index_fd=IndexFd, main_fd=MainFd,
     next_key=Key, next_location=Location}) ->
     Cookie = monic_utils:new_cookie(),
+    Flags = <<0:16>>,
     Version = 1,
-    Header = #header{key=Key, cookie=Cookie, size=Size, version=Version, flags=0},
+    Header = #header{key=Key, cookie=Cookie, size=Size, version=Version, flags=Flags},
     case monic_utils:pwrite_header(MainFd, Location, Header) of
         ok ->
             case copy_in(MainFd, Fun, Location + ?HEADER_SIZE, Size) of
@@ -184,7 +185,7 @@ add_item(Size, Fun, #state{tid=Tid, index_fd=IndexFd, main_fd=MainFd,
                             case file:datasync(MainFd) of
                                 ok ->
                                     monic_utils:write_index(IndexFd,
-                                    #index{key=Key,location=Location,size=Size,version=Version,flags=0}
+                                    #index{key=Key,location=Location,size=Size,version=Version,flags=Flags}
                                     ),
                                     ets:insert(Tid, {Key, Location, Size, Version}),
                                     {ok, Key, Cookie};
@@ -204,27 +205,20 @@ add_item(Size, Fun, #state{tid=Tid, index_fd=IndexFd, main_fd=MainFd,
 copy_in(Fd, Fun, Location, Remaining) ->
     copy_in(Fd, Fun, Location, Remaining, crypto:sha_init()).
 
-copy_in(_Fd, _Fun, _Location, 0, Sha) ->
+copy_in(_Fd, done, _Location, 0, Sha) ->
     {ok, crypto:sha_final(Sha)};
-copy_in(Fd, Fun, Location, Remaining, Sha) ->
-    case Fun(?BUFFER_SIZE) of
-        {ok, Bin} ->
-            Size = iolist_size(Bin),
-            case Size =< Remaining of
-                true ->                    
-                    case file:pwrite(Fd, Location, Bin) of
-                        ok ->
-                            copy_in(Fd, Fun, Location + Size,
-                                Remaining - Size,
-                                crypto:sha_update(Sha, Bin));
-                        Else ->
-                            Else
-                    end;
-                false ->
-                    {error, overflow}
-            end;
-        Else ->
-            Else
+copy_in(_Fd, done, _Location, _Remaining, _Sha) ->
+    {error, underflow};
+copy_in(Fd, Fun, Location, Remaining, Sha) ->    
+    {Bin, Next} = Fun(),
+    Size = iolist_size(Bin),
+    case Size =< Remaining of
+        true ->
+            file:pwrite(Fd, Location, Bin),
+            copy_in(Fd, Next, Location + Size, Remaining - Size,
+                crypto:sha_update(Sha, Bin));
+        false ->
+            {error, overflow}
     end.
 
 copy_out(_Fd, _Fun, _Location, 0) ->

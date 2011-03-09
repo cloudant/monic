@@ -35,13 +35,13 @@ exists(ReqData, Context) ->
 pwrite_header(Fd, Location, #header{key=Key,cookie=Cookie,size=Size,
     version=Version,flags=Flags}) ->
     Bin = <<?ITEM_HEADER_MAGIC:32/integer, Key:64/integer, Cookie:32/integer,
-        Size:64/integer, Version:16/integer, Flags:16/integer>>,
+        Size:64/integer, Version:16/integer, Flags:16/bitstring>>,
     file:pwrite(Fd, Location, Bin).
 
 pread_header(Fd, Location) ->
     case file:pread(Fd, Location, ?HEADER_SIZE) of
         {ok, <<?ITEM_HEADER_MAGIC:32/integer, Key:64/integer, Cookie:32/integer,
-            Size:64/integer, Version:16/integer, Flags:16/integer>>} ->
+            Size:64/integer, Version:16/integer, Flags:16/bitstring>>} ->
             {ok, #header{key=Key,cookie=Cookie,size=Size,version=Version,flags=Flags}};
         {ok, _} ->
             {error, invalid_header};
@@ -65,13 +65,13 @@ pread_footer(Fd, Location) ->
 
 write_index(Fd, #index{key=Key,location=Location,size=Size,version=Version,flags=Flags}) ->
     Bin = <<Key:64/integer, Location:64/integer, Size:64/integer,
-        Version:16/integer, Flags:16/integer>>,
+        Version:16/integer, Flags:16/bitstring>>,
     file:write(Fd, Bin).
 
 read_index(Fd) ->
     case file:read(Fd, ?INDEX_SIZE) of
         {ok, <<Key:64/integer, Location:64/integer, Size:64/integer,
-            Version:16/integer, Flags:16/integer>>} ->
+            Version:16/integer, Flags:16/bitstring>>} ->
                 {ok, #index{key=Key,location=Location,size=Size,
                     version=Version,flags=Flags}};
         {ok, _} ->

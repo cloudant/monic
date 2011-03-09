@@ -17,26 +17,43 @@
     allowed_methods/2,
     content_types_accepted/2,
     content_types_provided/2,
+    create_path/2,
     delete_resource/2,
     is_conflict/2,
-    resource_exists/2]).
-
--export([from_json/2, to_json/2]).
--import(monic_utils, [path/2, exists/2]).
+    post_is_create/2,
+    resource_exists/2,
+    valid_entity_length/2]).
+-export([show_file/2, create_file/2, add_item/2]).
 
 -include_lib("webmachine/include/webmachine.hrl").
+-define(BUFFER_SIZE, 64*1024).
 
 allowed_methods(ReqData, Context) ->
-    {['DELETE', 'GET', 'PUT'], ReqData, Context}.
+    {['DELETE', 'GET', 'PUT', 'POST'], ReqData, Context}.
 
 content_types_accepted(ReqData, Context) ->
-    {[{"application/json", from_json}], ReqData, Context}.
+    case wrq:method(ReqData) of
+        'PUT' ->
+            {[{"application/json", create_file}], ReqData, Context};
+        'POST' ->
+            CT = case wrq:get_req_header("Content-Type", ReqData) of
+                undefined -> "application/octet-stream";
+                Other -> Other
+            end,
+            {[{CT, add_item}], ReqData, Context}
+    end.
 
 content_types_provided(ReqData, Context) ->
-    {[{"application/json", to_json}], ReqData, Context}.
+    {[{"application/json", show_file}], ReqData, Context}.
+
+create_path(ReqData, Context) ->
+    File = wrq:path_info(file, ReqData),
+    Key = 1, %% TODO increment.
+    Cookie = crypto:rand_uniform(1, 1 bsl 32),
+    {io_lib:format("/~s/~B/~B", [File, Key, Cookie]), ReqData, Context}.
 
 delete_resource(ReqData, Context) ->
-    case file:delete(path(ReqData, Context)) of
+    case file:delete(monic_utils:path(ReqData, Context)) of
         ok ->
             {true, ReqData, Context};
         _ ->
@@ -47,15 +64,49 @@ init(ConfigProps) ->
     {ok, ConfigProps}.
 
 is_conflict(ReqData, Context) ->
-    {exists(ReqData, Context), ReqData, Context}.
+    {monic_utils:exists(ReqData, Context), ReqData, Context}.
+
+post_is_create(ReqData, Context) ->
+    {true, ReqData, Context}.
 
 resource_exists(ReqData, Context) ->
-    {exists(ReqData, Context), ReqData, Context}.
+    {monic_utils:exists(ReqData, Context), ReqData, Context}.
 
-from_json(ReqData, Context) ->
-    ok = file:write_file(path(ReqData, Context), <<>>, [exclusive]),
-    {true, ReqData, Context}.
- 
-to_json(ReqData, Context) ->
+valid_entity_length(ReqData, Context) ->
+    Valid = case wrq:method(ReqData) of
+        'POST' ->
+            wrq:get_req_header("Content-Length", ReqData) /= undefined;
+        _ ->
+            true
+    end,    
+    {Valid, ReqData, Context}.
+
+%% private functions
+
+show_file(ReqData, Context) ->
     {"{\"ok\": true}", ReqData, Context}.
 
+create_file(ReqData, Context) ->
+    case file:write_file(monic_utils:path(ReqData, Context), <<>>, [exclusive]) of
+        ok -> {true, ReqData, Context};
+        _ -> {false, ReqData, Context}
+    end.
+
+add_item(ReqData, Context) ->
+    case monic_file:open(monic_utils:path(ReqData, Context)) of
+        {ok, Pid} ->
+            try
+                Size = list_to_integer(wrq:get_req_header("Content-Length", ReqData)),
+                StreamBody = fun() -> wrq:stream_req_body(ReqData, ?BUFFER_SIZE) end,
+                case monic_file:add(Pid, Size, StreamBody) of
+                    {ok, Key, Cookie} ->
+                        {true, ReqData, Context};
+                    _ ->
+                        {false, ReqData, Context}
+                end
+            after
+                monic_file:close(Pid)
+            end;
+        _ ->
+            {false, ReqData, Context}
+    end.

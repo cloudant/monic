@@ -23,7 +23,8 @@ all_test_() ->
     [fun add/1,
     fun add_read/1,
     fun add_multi/1,
-    fun overflow/1
+    fun overflow/1,
+    fun underflow/1
     ]}.
 
 setup() ->
@@ -36,18 +37,22 @@ cleanup(Pid) ->
     monic_file:close(Pid).
 
 add(Pid) ->
-    ?_assertMatch({ok, 0, _}, monic_file:add(Pid, 3, fun(_Max) -> {ok, <<"123">>} end)).
+    ?_assertMatch({ok, 0, _}, monic_file:add(Pid, 3, fun() -> {<<"123">>, done} end)).
 
 add_read(Pid) ->
-    {ok, Key, Cookie} = monic_file:add(Pid, 3, fun(_Max) -> {ok, <<"123">>} end),
+    {ok, Key, Cookie} = monic_file:add(Pid, 3, fun() -> {<<"123">>, done} end),
     ?_assertEqual(ok, monic_file:read(Pid, Key, Cookie, fun({ok, <<"123">>}) -> ok end)).
 
 add_multi(Pid) ->
-    [?_assertMatch({ok, 0, _}, monic_file:add(Pid, 3, fun(_Max) -> {ok, <<"123">>} end)),
-    ?_assertMatch({ok, 1, _}, monic_file:add(Pid, 3, fun(_Max) -> {ok, <<"456">>} end)),
-    ?_assertMatch({ok, 2, _}, monic_file:add(Pid, 3, fun(_Max) -> {ok, <<"789">>} end)),
-    ?_assertMatch({ok, 3, _}, monic_file:add(Pid, 3, fun(_Max) -> {ok, <<"abc">>} end))].
+    [?_assertMatch({ok, 0, _}, monic_file:add(Pid, 3, fun() -> {<<"123">>, done} end)),
+    ?_assertMatch({ok, 1, _}, monic_file:add(Pid, 3, fun() -> {<<"456">>, done} end)),
+    ?_assertMatch({ok, 2, _}, monic_file:add(Pid, 3, fun() -> {<<"789">>, done} end)),
+    ?_assertMatch({ok, 3, _}, monic_file:add(Pid, 3, fun() -> {<<"abc">>, done} end))].
 
 overflow(Pid) ->
-    Res = monic_file:add(Pid, 3, fun(_Max) -> {ok, <<"1234">>} end),
+    Res = monic_file:add(Pid, 3, fun() -> {<<"1234">>, done} end),
     ?_assertEqual({error, overflow}, Res).
+
+underflow(Pid) ->
+    Res = monic_file:add(Pid, 3, fun() -> {<<"12">>, done} end),
+    ?_assertEqual({error, underflow}, Res).
