@@ -208,12 +208,10 @@ copy_in(Fd, StreamBody, Location, Remaining) ->
 copy_in(Fd, {Bin, Next}, Location, Remaining, Sha) ->
     Size = iolist_size(Bin),
     case {Next, Remaining} of
-        {_, 0} ->
+        {_, Remaining} when Remaining < Size ->
             {error, overflow};
         {done, Remaining} when Remaining > Size ->
             {error, underflow};
-        {done, Remaining} when Remaining < Size ->
-            {error, overflow};
         _ ->
             file:pwrite(Fd, Location, Bin),
             Sha1 = crypto:sha_update(Sha, Bin),
