@@ -97,7 +97,7 @@ add_item(ReqData, Context) ->
         {ok, Pid} ->
             try
                 Size = list_to_integer(wrq:get_req_header("Content-Length", ReqData)),
-                StreamBody = fun() -> wrq:stream_req_body(ReqData, ?BUFFER_SIZE) end,
+                StreamBody = wrq:stream_req_body(ReqData, ?BUFFER_SIZE),
                 case monic_file:add(Pid, Size, StreamBody) of
                     {ok, Key, Cookie} ->
                         {true, ReqData, Context};

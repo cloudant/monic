@@ -37,8 +37,8 @@
 open(Path) ->
     gen_server:start_link({local, list_to_atom(Path)}, ?MODULE, Path, []).
 
-add(Pid, Size, Fun) ->
-    gen_server:call(Pid, {add, Size, Fun}, infinity).
+add(Pid, Size, StreamBody) ->
+    gen_server:call(Pid, {add, Size, StreamBody}, infinity).
 
 read(Pid, Key, Cookie, Fun) ->
     gen_server:call(Pid, {read, Key, Cookie, Fun}, infinity).
@@ -83,8 +83,8 @@ handle_call({read, Key, Cookie, Fun}, _From, #state{tid=Tid, main_fd=Fd}=State) 
         [] ->
             {reply, not_found, State}
     end;
-handle_call({add, Size, Fun}, _From, #state{main_fd=Fd,next_location=NextLocation}=State) ->
-    case add_item(Size, Fun, State) of
+handle_call({add, Size, StreamBody}, _From, #state{main_fd=Fd,next_location=NextLocation}=State) ->
+    case add_item(Size, StreamBody, State) of
         {ok, Key, Cookie} ->
             {reply, {ok, Key, Cookie}, State#state{
                 next_key = Key + 1,
@@ -169,7 +169,7 @@ load_main_items(Tid, Fd, {_, Location}=Hints) ->
             Else
     end.
 
-add_item(Size, Fun, #state{tid=Tid, index_fd=IndexFd, main_fd=MainFd,
+add_item(Size, StreamBody, #state{tid=Tid, index_fd=IndexFd, main_fd=MainFd,
     next_key=Key, next_location=Location}) ->
     Cookie = monic_utils:new_cookie(),
     Flags = <<0:16>>,
@@ -177,7 +177,7 @@ add_item(Size, Fun, #state{tid=Tid, index_fd=IndexFd, main_fd=MainFd,
     Header = #header{key=Key, cookie=Cookie, size=Size, version=Version, flags=Flags},
     case monic_utils:pwrite_header(MainFd, Location, Header) of
         ok ->
-            case copy_in(MainFd, Fun, Location + ?HEADER_SIZE, Size) of
+            case copy_in(MainFd, StreamBody, Location + ?HEADER_SIZE, Size) of
                 {ok, Sha} ->
                     Footer = #footer{sha=Sha},
                     case monic_utils:pwrite_footer(MainFd, Location + ?HEADER_SIZE + Size, Footer) of
@@ -202,23 +202,27 @@ add_item(Size, Fun, #state{tid=Tid, index_fd=IndexFd, main_fd=MainFd,
             Else
     end.
 
-copy_in(Fd, Fun, Location, Remaining) ->
-    copy_in(Fd, Fun, Location, Remaining, crypto:sha_init()).
+copy_in(Fd, StreamBody, Location, Remaining) ->
+    copy_in(Fd, StreamBody, Location, Remaining, crypto:sha_init()).
 
-copy_in(_Fd, done, _Location, 0, Sha) ->
-    {ok, crypto:sha_final(Sha)};
-copy_in(_Fd, done, _Location, _Remaining, _Sha) ->
-    {error, underflow};
-copy_in(Fd, Fun, Location, Remaining, Sha) ->    
-    {Bin, Next} = Fun(),
+copy_in(Fd, {Bin, Next}, Location, Remaining, Sha) ->
     Size = iolist_size(Bin),
-    case Size =< Remaining of
-        true ->
+    case {Next, Remaining} of
+        {_, 0} ->
+            {error, overflow};
+        {done, Remaining} when Remaining > Size ->
+            {error, underflow};
+        {done, Remaining} when Remaining < Size ->
+            {error, overflow};
+        _ ->
             file:pwrite(Fd, Location, Bin),
-            copy_in(Fd, Next, Location + Size, Remaining - Size,
-                crypto:sha_update(Sha, Bin));
-        false ->
-            {error, overflow}
+            Sha1 = crypto:sha_update(Sha, Bin),
+            case Next of
+                done ->
+                    {ok, crypto:sha_final(Sha1)};
+                _ ->
+                    copy_in(Fd, Next(), Location + Size, Remaining - Size, Sha1)
+            end
     end.
 
 copy_out(_Fd, _Fun, _Location, 0) ->
