@@ -38,7 +38,8 @@ cleanup(Pid) ->
     monic_file:close(Pid).
 
 add(Pid) ->
-    ?_assertMatch({ok, 0, _}, monic_file:add(Pid, 3, {<<"123">>, done})).
+    [?_assertMatch({ok, 0, _}, monic_file:add(Pid, 3, {<<"123">>, done})),
+    ?_assertMatch(true, monic_file:exists(Pid, 0, 0))].
 
 add_long(Pid) ->
     ?_assertMatch({ok, 0, _}, monic_file:add(Pid, 6,

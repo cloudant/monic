@@ -24,10 +24,8 @@
     tid=nil
 }).
 
--define(BUFFER_SIZE, 16384).
-
 %% public API
--export([open/1, add/3, read/4, close/1]).
+-export([open/1, add/3, lookup/3, close/1]).
 
 %% gen_server API
 -export([init/1, terminate/2, code_change/3,handle_call/3, handle_cast/2, handle_info/2]).
@@ -40,8 +38,8 @@ open(Path) ->
 add(Pid, Size, StreamBody) ->
     gen_server:call(Pid, {add, Size, StreamBody}, infinity).
 
-read(Pid, Key, Cookie, Fun) ->
-    gen_server:call(Pid, {read, Key, Cookie, Fun}, infinity).
+lookup(Pid, Key, Cookie) ->
+    gen_server:call(Pid, {lookup, Key, Cookie}, infinity).
 
 close(Pid) ->
     gen_server:call(Pid, close, infinity).
@@ -68,6 +66,14 @@ init(Path) ->
             {stop, Else}
     end.
 
+handle_call({lookup, Key, _Cookie}, _From, #state{tid=Tid}=State) ->
+    Reply = case ets:lookup(Tid, Key) of
+        [] ->
+            {error, not_found};
+        [{Key, Location, Size, _}] ->
+            {ok, Location, Size}
+    end,
+    {reply, Reply, State};
 handle_call({read, Key, Cookie, Fun}, _From, #state{tid=Tid, main_fd=Fd}=State) ->
     case ets:lookup(Tid, Key) of
         [{Key, Location, Size, _}] ->
@@ -223,7 +229,8 @@ copy_in(Fd, {Bin, Next}, Location, Remaining, Sha) ->
             end
     end.
 
-copy_out(_Fd, _Fun, _Location, 0) ->
+copy_out(_Fd, Fun, _Location, 0) ->
+    Fun(eof),
     ok;
 copy_out(Fd, Fun, Location, Remaining) ->
     case file:pread(Fd, Location, min(Remaining, ?BUFFER_SIZE)) of

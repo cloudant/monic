@@ -26,7 +26,7 @@
 -export([show_file/2, create_file/2, add_item/2]).
 
 -include_lib("webmachine/include/webmachine.hrl").
--define(BUFFER_SIZE, 64*1024).
+-include("monic.hrl").
 
 allowed_methods(ReqData, Context) ->
     {['DELETE', 'GET', 'PUT', 'POST'], ReqData, Context}.
@@ -89,7 +89,6 @@ create_file(ReqData, Context) ->
     end.
 
 add_item(ReqData, Context) ->
-    erlang:display({disp, wrq:disp_path(ReqData)}),
     case monic_file:open(monic_utils:path(ReqData, Context)) of
         {ok, Pid} ->
             try

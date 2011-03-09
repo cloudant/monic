@@ -1,3 +1,4 @@
+-define(BUFFER_SIZE, 64*1024).
 -define(INDEX_SIZE, 28).
 -define(HEADER_SIZE, 28).
 -define(FOOTER_SIZE, 24).
