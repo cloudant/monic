@@ -27,7 +27,7 @@
 -define(BUFFER_SIZE, 16384).
 
 %% public API
--export([open/1, write/3, read/4, close/1]).
+-export([open/1, add/3, read/4, close/1]).
 
 %% gen_server API
 -export([init/1, terminate/2, code_change/3,handle_call/3, handle_cast/2, handle_info/2]).
@@ -37,8 +37,8 @@
 open(Path) ->
     gen_server:start_link({local, list_to_atom(Path)}, ?MODULE, Path, []).
 
-write(Pid, Size, Fun) ->
-    gen_server:call(Pid, {write, Size, Fun}, infinity).
+add(Pid, Size, Fun) ->
+    gen_server:call(Pid, {add, Size, Fun}, infinity).
 
 read(Pid, Key, Cookie, Fun) ->
     gen_server:call(Pid, {read, Key, Cookie, Fun}, infinity).
@@ -83,8 +83,8 @@ handle_call({read, Key, Cookie, Fun}, _From, #state{tid=Tid, main_fd=Fd}=State) 
         [] ->
             {reply, not_found, State}
     end;
-handle_call({write, Size, Fun}, _From, #state{main_fd=Fd,next_location=NextLocation}=State) ->
-    case new_item(Size, Fun, State) of
+handle_call({add, Size, Fun}, _From, #state{main_fd=Fd,next_location=NextLocation}=State) ->
+    case add_item(Size, Fun, State) of
         {ok, Key, Cookie} ->
             {reply, {ok, Key, Cookie}, State#state{
                 next_key = Key + 1,
@@ -169,7 +169,7 @@ load_main_items(Tid, Fd, {_, Location}=Hints) ->
             Else
     end.
 
-new_item(Size, Fun, #state{tid=Tid, index_fd=IndexFd, main_fd=MainFd,
+add_item(Size, Fun, #state{tid=Tid, index_fd=IndexFd, main_fd=MainFd,
     next_key=Key, next_location=Location}) ->
     Cookie = monic_utils:new_cookie(),
     Version = 1,

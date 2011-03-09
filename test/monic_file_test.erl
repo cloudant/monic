@@ -20,8 +20,9 @@ all_test_() ->
     {foreach,
     fun setup/0,
     fun cleanup/1,
-    [fun write/1,
-    fun write_read/1,
+    [fun add/1,
+    fun add_read/1,
+    fun add_multi/1,
     fun overflow/1
     ]}.
 
@@ -34,13 +35,19 @@ setup() ->
 cleanup(Pid) ->
     monic_file:close(Pid).
 
-write(Pid) ->
-    ?_assertMatch({ok, 0, _}, monic_file:write(Pid, 3, fun(_Max) -> {ok, <<"123">>} end)).
+add(Pid) ->
+    ?_assertMatch({ok, 0, _}, monic_file:add(Pid, 3, fun(_Max) -> {ok, <<"123">>} end)).
 
-write_read(Pid) ->
-    {ok, Key, Cookie} = monic_file:write(Pid, 3, fun(_Max) -> {ok, <<"123">>} end),
-    ?_assertEqual(ok, monic_file:read(Pid, Key, Cookie, fun(_) -> ok end)).
+add_read(Pid) ->
+    {ok, Key, Cookie} = monic_file:add(Pid, 3, fun(_Max) -> {ok, <<"123">>} end),
+    ?_assertEqual(ok, monic_file:read(Pid, Key, Cookie, fun({ok, <<"123">>}) -> ok end)).
+
+add_multi(Pid) ->
+    [?_assertMatch({ok, 0, _}, monic_file:add(Pid, 3, fun(_Max) -> {ok, <<"123">>} end)),
+    ?_assertMatch({ok, 1, _}, monic_file:add(Pid, 3, fun(_Max) -> {ok, <<"456">>} end)),
+    ?_assertMatch({ok, 2, _}, monic_file:add(Pid, 3, fun(_Max) -> {ok, <<"789">>} end)),
+    ?_assertMatch({ok, 3, _}, monic_file:add(Pid, 3, fun(_Max) -> {ok, <<"abc">>} end))].
 
 overflow(Pid) ->
-    Res = monic_file:write(Pid, 3, fun(_Max) -> {ok, <<"1234">>} end),
+    Res = monic_file:add(Pid, 3, fun(_Max) -> {ok, <<"1234">>} end),
     ?_assertEqual({error, overflow}, Res).
