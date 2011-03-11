@@ -12,7 +12,7 @@
 %% License for the specific language governing permissions and limitations under
 %% the License.
 
--module(monic_file_test).
+-module(monic_file_tests).
 -include("monic.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
@@ -38,8 +38,9 @@ cleanup(Pid) ->
     monic_file:close(Pid).
 
 add(Pid) ->
-    [?_assertMatch({ok, 0, _}, monic_file:add(Pid, 3, {<<"123">>, done})),
-    ?_assertMatch(true, monic_file:exists(Pid, 0, 0))].
+    Result = monic_file:add(Pid, 3, {<<"123">>, done}),
+    ?_assertMatch({ok, _}, Result),
+    {ok, {Key, Cookie}} = Result.
 
 add_long(Pid) ->
     ?_assertMatch({ok, 0, _}, monic_file:add(Pid, 6,
