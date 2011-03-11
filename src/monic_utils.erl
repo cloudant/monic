@@ -63,16 +63,16 @@ pread_footer(Fd, Location) ->
             Else
     end.
 
-write_index(Fd, #index{key=Key,location=Location,size=Size,version=Version,flags=Flags}) ->
-    Bin = <<Key:64/integer, Location:64/integer, Size:64/integer,
+write_index(Fd, #index{cookie=Cookie,key=Key,location=Location,size=Size,version=Version,flags=Flags}) ->
+    Bin = <<Key:64/integer, Cookie:32/integer, Location:64/integer, Size:64/integer,
         Version:16/integer, Flags:16/bitstring>>,
     file:write(Fd, Bin).
 
 read_index(Fd) ->
     case file:read(Fd, ?INDEX_SIZE) of
-        {ok, <<Key:64/integer, Location:64/integer, Size:64/integer,
+        {ok, <<Key:64/integer, Cookie:32/integer, Location:64/integer, Size:64/integer,
             Version:16/integer, Flags:16/bitstring>>} ->
-                {ok, #index{key=Key,location=Location,size=Size,
+                {ok, #index{cookie=Cookie,key=Key,location=Location,size=Size,
                     version=Version,flags=Flags}};
         {ok, _} ->
             {error, invalid_index};

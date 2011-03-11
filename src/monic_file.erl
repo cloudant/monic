@@ -110,8 +110,8 @@ handle_call({write, Ref, {Bin, Next}}, _From, #state{main_fd=Fd, write_pos=Pos, 
                         ok ->
                             Index = State#state.next_index,
                             monic_utils:write_index(State#state.index_fd, Index),
-                            ets:insert(State#state.tid, {Index#index.key, Index#index.location,
-                                Index#index.size, Index#index.version}),
+                            ets:insert(State#state.tid, {Index#index.key, Index#index.cookie,
+                                Index#index.location, Index#index.size, Index#index.version}),
                             {reply, {ok, {Index#index.key, Index#index.cookie}},
                             State#state{next_index=nil, next_key=State#state.next_key+1,
                             reset_pos=Pos1, write_pos=Pos1, writer=nil}};
@@ -128,12 +128,12 @@ handle_call({write, _Ref, _StreamBody}, _From, State) ->
     {reply, {error, not_writing}, State};
 
 handle_call({read, Key, Cookie}, _From, #state{main_fd=Fd, tid=Tid}=State) ->
-    case ets:lookup(Tid, Key) of
-        [] ->
-            {reply, {error, not_found}, State};
-        [{Key, Location, Size, _Version}] ->
+    case info_int(Tid, Key, Cookie) of
+        {ok, {Location, Size, _Version}} ->
             Self = self(),
-            {reply, {ok, fun() -> stream_out(Self, Location + ?HEADER_SIZE, Size) end}, State}
+            {reply, {ok, fun() -> stream_out(Self, Location + ?HEADER_SIZE, Size) end}, State};
+        Else ->
+            {reply, Else, State}
     end;
 
 handle_call({read_hunk, Location, Size}, _From, #state{main_fd=Fd}=State) ->
@@ -176,9 +176,9 @@ load_index_items(Tid, Fd) ->
 
 load_index_items(Tid, Fd, Hints) ->
     case monic_utils:read_index(Fd) of
-        {ok, #index{key=Key,location=Location,size=Size,version=Version,flags= <<Deleted:1,_:15>>}} ->
+        {ok, #index{key=Key,cookie=Cookie,location=Location,size=Size,version=Version,flags= <<Deleted:1,_:15>>}} ->
             case Deleted of
-                0 -> ets:insert(Tid, {Key, Location, Size, Version});
+                0 -> ets:insert(Tid, {Key, Cookie, Location, Size, Version});
                 1 -> ets:delete(Tid, Key)
             end,
             load_index_items(Tid, Fd, {Key + 1, Location + Size + ?HEADER_SIZE + ?FOOTER_SIZE});
@@ -203,9 +203,9 @@ load_main(Tid, Path, Hints) ->
 
 load_main_items(Tid, Fd, {_, Location}=Hints) ->
     case monic_utils:pread_header(Fd, Location) of
-        {ok, #header{key=Key,cookie=_Cookie,size=Size,version=Version,flags= <<Deleted:1,_:15>>}} ->
+        {ok, #header{key=Key,cookie=Cookie,size=Size,version=Version,flags= <<Deleted:1,_:15>>}} ->
             case Deleted of
-                0 -> ets:insert(Tid, {Key, Location, Size, Version});
+                0 -> ets:insert(Tid, {Key, Cookie, Location, Size, Version});
                 1 -> ets:delete(Tid, Key)
             end,
             load_main_items(Tid, Fd, {Key + 1, Location + Size + ?HEADER_SIZE + ?FOOTER_SIZE});
@@ -250,10 +250,10 @@ stream_out(Pid, Location, Remaining) ->
 
 info_int(Tid, Key, Cookie) ->
    case ets:lookup(Tid, Key) of
-        [] ->
-            {error, not_found};
-        [{Key, Location, Size, Version}] ->
-            {ok, {Location, Size, Version}}
+        [{Key, Cookie, Location, Size, Version}] ->
+            {ok, {Location, Size, Version}};
+        _ ->
+            {error, not_found}
     end.
 
 cleanup(#state{tid=Tid,index_fd=IndexFd,main_fd=MainFd}=State) ->
