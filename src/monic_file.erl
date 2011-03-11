@@ -54,8 +54,8 @@ info(Pid, Key, Cookie) ->
 
 read(Pid, Key, Cookie) ->
     case gen_server:call(Pid, {read, Key, Cookie}) of
-        {ok, StreamBody} ->
-            {ok, StreamBody()};
+        {ok, StreamBodyFun} ->
+            {ok, StreamBodyFun()};
         Else ->
             Else
     end.
