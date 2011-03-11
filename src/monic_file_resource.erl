@@ -91,20 +91,16 @@ create_file(ReqData, Context) ->
 add_item(ReqData, Context) ->
     case monic_file:open(monic_utils:path(ReqData, Context)) of
         {ok, Pid} ->
-            try
-                Size = list_to_integer(wrq:get_req_header("Content-Length", ReqData)),
-                StreamBody = wrq:stream_req_body(ReqData, ?BUFFER_SIZE),
-                case monic_file:add(Pid, Size, StreamBody) of
-                    {ok, {Key, Cookie}} ->
-                        File = wrq:path_info(file, ReqData),
-                        Location = io_lib:format("/~s/~B/~B",[File, Key, Cookie]),
-                        ReqData1 = wrq:set_resp_header("Location", Location, ReqData),
-                        {true, ReqData1, Context};
-                    _ ->
-                        {false, ReqData, Context}
-                end
-            after
-                monic_file:close(Pid)
+            Size = list_to_integer(wrq:get_req_header("Content-Length", ReqData)),
+            StreamBody = wrq:stream_req_body(ReqData, ?BUFFER_SIZE),
+            case monic_file:add(Pid, Size, StreamBody) of
+                {ok, {Key, Cookie}} ->
+                    File = wrq:path_info(file, ReqData),
+                    Location = io_lib:format("/~s/~B/~B",[File, Key, Cookie]),
+                    ReqData1 = wrq:set_resp_header("Location", Location, ReqData),
+                    {true, ReqData1, Context};
+                _ ->
+                    {false, ReqData, Context}
             end;
         _ ->
             {false, ReqData, Context}

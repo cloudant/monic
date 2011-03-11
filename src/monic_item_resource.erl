@@ -36,15 +36,11 @@ resource_exists(ReqData, Context) ->
     Cookie = list_to_integer(wrq:path_info(cookie, ReqData)),
     Exists = case monic_file:open(monic_utils:path(ReqData, Context)) of
         {ok, Pid} ->
-            try
-                case monic_file:info(Pid, Key, Cookie) of
-                    {ok, _} ->
-                        true;
-                    {error, not_found} ->
-                        false
-                end
-            after
-                monic_file:close(Pid)
+            case monic_file:info(Pid, Key, Cookie) of
+                {ok, _} ->
+                    true;
+                {error, not_found} ->
+                    false
             end;
         _ ->
             false
@@ -57,12 +53,8 @@ fetch(ReqData, Context) ->
     Cookie = list_to_integer(wrq:path_info(cookie, ReqData)),
     case monic_file:open(Path) of
         {ok, Pid} ->
-            try
-                {ok, StreamBody} = monic_file:read(Pid, Key, Cookie),
-                {{stream, StreamBody}, ReqData, Context}
-            after
-                monic_file:close(Pid)
-            end;
+            {ok, StreamBody} = monic_file:read(Pid, Key, Cookie),
+            {{stream, StreamBody}, ReqData, Context};
         _ ->
             {<<>>, ReqData, Context}
     end.
