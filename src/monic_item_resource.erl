@@ -37,8 +37,8 @@ resource_exists(ReqData, Context) ->
     Exists = case monic_file:open(monic_utils:path(ReqData, Context)) of
         {ok, Pid} ->
             try
-                case monic_file:lookup(Pid, Key, Cookie) of
-                    {ok, _, _} ->
+                case monic_file:info(Pid, Key, Cookie) of
+                    {ok, _} ->
                         true;
                     {error, not_found} ->
                         false
@@ -58,31 +58,11 @@ fetch(ReqData, Context) ->
     case monic_file:open(Path) of
         {ok, Pid} ->
             try
-                StreamBody = case monic_file:lookup(Pid, Key, Cookie) of
-                    {ok, Location, Size} ->
-                        case file:open(Path, [read]) of
-                            {ok, Fd} ->
-                                {stream, pump(Fd, Location, Size)};
-                            _ ->
-                                <<>>
-                        end;
-                    {error, not_found} ->
-                        <<>>
-                end,
-                {StreamBody, ReqData, Context}
+                {ok, StreamBody} = monic_file:read(Pid, Key, Cookie),
+                {{stream, StreamBody}, ReqData, Context}
             after
                 monic_file:close(Pid)
             end;
         _ ->
             {<<>>, ReqData, Context}
-    end.
-
-pump(Fd, Location, Remaining) ->
-    {ok, Bin} = file:pread(Fd, Location, min(Remaining, ?BUFFER_SIZE)),
-    Size = iolist_size(Bin),
-    case Size == Remaining of
-        true ->
-            {Bin, done};
-        false ->
-            {Bin, fun() -> pump(Fd, Location + Size, Remaining - Size) end}
     end.

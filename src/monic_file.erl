@@ -16,33 +16,49 @@
 -behavior(gen_server).
 -include("monic.hrl").
 
--record(state, {
-    next_location=0,
-    index_fd=nil,
-    main_fd=nil,
-    next_key=0,
-    tid=nil
-}).
-
 %% public API
--export([open/1, add/3, lookup/3, close/1]).
+-export([open/1, close/1, add/3, info/3, read/3]).
 
 %% gen_server API
 -export([init/1, terminate/2, code_change/3,handle_call/3, handle_cast/2, handle_info/2]).
+
+-record(state, {
+    tid,
+    index_fd=nil,
+    main_fd=nil,    
+    next_index,
+    next_key,
+    reset_pos,
+    write_pos,
+    writer=nil
+}).
 
 %% public functions
 
 open(Path) ->
     gen_server:start_link({local, list_to_atom(Path)}, ?MODULE, Path, []).
 
-add(Pid, Size, StreamBody) ->
-    gen_server:call(Pid, {add, Size, StreamBody}, infinity).
-
-lookup(Pid, Key, Cookie) ->
-    gen_server:call(Pid, {lookup, Key, Cookie}, infinity).
-
 close(Pid) ->
     gen_server:call(Pid, close, infinity).
+
+add(Pid, Size, StreamBody) ->
+    case gen_server:call(Pid, {start_writing, Size}) of
+        {ok, Ref} ->
+            stream_in(Pid, Ref, StreamBody);
+        Else ->
+            Else
+    end.
+
+info(Pid, Key, Cookie) ->
+    gen_server:call(Pid, {info, Key, Cookie}).
+
+read(Pid, Key, Cookie) ->
+    case gen_server:call(Pid, {read, Key, Cookie}) of
+        {ok, StreamBody} ->
+            {ok, StreamBody()};
+        Else ->
+            Else
+    end.
 
 %% gen_server functions
 
@@ -56,7 +72,8 @@ init(Path) ->
                         index_fd=IndexFd,
                         main_fd=MainFd,
                         next_key=NextKey,
-                        next_location=NextLocation,
+                        reset_pos=NextLocation,
+                        write_pos=NextLocation,                        
                         tid=Tid
                     }};
                 Else ->
@@ -66,41 +83,64 @@ init(Path) ->
             {stop, Else}
     end.
 
-handle_call({lookup, Key, _Cookie}, _From, #state{tid=Tid}=State) ->
-    Reply = case ets:lookup(Tid, Key) of
-        [] ->
-            {error, not_found};
-        [{Key, Location, Size, _}] ->
-            {ok, Location, Size}
-    end,
-    {reply, Reply, State};
-handle_call({read, Key, Cookie, Fun}, _From, #state{tid=Tid, main_fd=Fd}=State) ->
-    case ets:lookup(Tid, Key) of
-        [{Key, Location, Size, _}] ->
-            case monic_utils:pread_header(Fd, Location) of
-                {ok, #header{cookie=Cookie,size=Size}} ->
-                    copy_out(Fd, Fun, Location + ?HEADER_SIZE, Size),
-                    {reply, ok, State};
-                {ok, _} ->
-                    {reply, {error, wrong_cookie}, State};
-                Else ->
-                    {reply, Else, State}
-            end;
-        [] ->
-            {reply, not_found, State}
-    end;
-handle_call({add, Size, StreamBody}, _From, #state{main_fd=Fd,next_location=NextLocation}=State) ->
-    case add_item(Size, StreamBody, State) of
-        {ok, Key, Cookie} ->
-            {reply, {ok, Key, Cookie}, State#state{
-                next_key = Key + 1,
-                next_location = NextLocation + Size + ?HEADER_SIZE + ?FOOTER_SIZE
-            }};
+handle_call({start_writing, Size}, _From,
+    #state{main_fd=MainFd, next_key=Key, write_pos=Pos, writer=nil}=State) ->
+    Ref = make_ref(),
+    Cookie = monic_utils:new_cookie(),
+    Flags = <<0:16>>,
+    Version = 1,
+    Header = #header{cookie=Cookie, flags=Flags, key=Key, size=Size, version=Version},
+    Index = #index{cookie=Cookie, key=Key, flags=Flags, location=Pos, size=Size, version=Version},
+    case monic_utils:pwrite_header(MainFd, Pos, Header) of
+        ok ->
+            {reply, {ok, Ref}, State#state{next_index=Index, write_pos=Pos + ?HEADER_SIZE, writer=Ref}};
         Else ->
-            file:position(Fd, NextLocation),
-            file:truncate(Fd),
-            {reply, Else, State}
+            {reply, Else, abandon_write(State)}
     end;
+handle_call({start_writing, _Size}, _From, State) ->
+    {reply, {error, already_writing}, State};
+
+handle_call({write, Ref, {Bin, Next}}, _From, #state{main_fd=Fd, write_pos=Pos, writer=Ref}=State) ->
+    case file:pwrite(Fd, Pos, Bin) of
+        ok ->
+            Pos1 = Pos + iolist_size(Bin),
+            case Next of
+                done ->
+                    case file:datasync(Fd) of
+                        ok ->
+                            Index = State#state.next_index,
+                            monic_utils:write_index(State#state.index_fd, Index),
+                            ets:insert(State#state.tid, {Index#index.key, Index#index.location,
+                                Index#index.size, Index#index.version}),
+                            {reply, {ok, Index#index.key, Index#index.cookie},
+                            State#state{next_index=nil, next_key=State#state.next_key+1,
+                            reset_pos=Pos1, write_pos=Pos1, writer=nil}};
+                        Else ->
+                            {reply, Else, abandon_write(State)}
+                    end;
+                Next ->
+                    {reply, {continue, Next}, State#state{write_pos=Pos1}}
+            end;
+        {Else, _} ->
+            {reply, Else, abandon_write(State)}
+    end;
+handle_call({write, _Ref, _StreamBody}, _From, State) ->
+    {reply, {error, not_writing}, State};
+
+handle_call({read, Key, Cookie}, _From, #state{main_fd=Fd, tid=Tid}=State) ->
+    case ets:lookup(Tid, Key) of
+        [] ->
+            {reply, {error, not_found}, State};
+        [{Key, Location, Size, _Version}] ->
+            Self = self(),
+            {reply, {ok, fun() -> stream_out(Self, Location + ?HEADER_SIZE, Size) end}, State}
+    end;
+
+handle_call({read_hunk, Location, Size}, _From, #state{main_fd=Fd}=State) ->
+    {reply, file:pread(Fd, Location, Size), State};
+
+handle_call({info, Key, Cookie}, _From, #state{tid=Tid}=State) ->
+    {reply, info_int(Tid, Key, Cookie), State};
 handle_call(close, _From, State) ->
     {stop, normal, ok, cleanup(State)}.
 
@@ -175,71 +215,45 @@ load_main_items(Tid, Fd, {_, Location}=Hints) ->
             Else
     end.
 
-add_item(Size, StreamBody, #state{tid=Tid, index_fd=IndexFd, main_fd=MainFd,
-    next_key=Key, next_location=Location}) ->
-    Cookie = monic_utils:new_cookie(),
-    Flags = <<0:16>>,
-    Version = 1,
-    Header = #header{key=Key, cookie=Cookie, size=Size, version=Version, flags=Flags},
-    case monic_utils:pwrite_header(MainFd, Location, Header) of
-        ok ->
-            case copy_in(MainFd, StreamBody, Location + ?HEADER_SIZE, Size) of
-                {ok, Sha} ->
-                    Footer = #footer{sha=Sha},
-                    case monic_utils:pwrite_footer(MainFd, Location + ?HEADER_SIZE + Size, Footer) of
-                        ok ->
-                            case file:datasync(MainFd) of
-                                ok ->
-                                    monic_utils:write_index(IndexFd,
-                                    #index{key=Key,location=Location,size=Size,version=Version,flags=Flags}
-                                    ),
-                                    ets:insert(Tid, {Key, Location, Size, Version}),
-                                    {ok, Key, Cookie};
-                                Else ->
-                                    Else
-                            end;
-                        Else ->
-                            Else
-                    end;
-                Else ->
-                    Else
-            end;
+abandon_write(#state{main_fd=Fd, reset_pos=Pos}=State) ->
+    case file:position(Fd, Pos) of
+        {ok, Pos} ->
+            file:truncate(Fd);
+        _ ->
+            ok
+    end,
+    State#state{write_pos=Pos, writer=nil}.
+
+stream_in(Pid, Ref, StreamBody) ->
+    case gen_server:call(Pid, {write, Ref, StreamBody}, infinity) of
+        {ok, Key, Cookie} ->
+            {ok, Key, Cookie};
+        {continue, Next} ->
+            stream_in(Pid, Ref, Next());
         Else ->
             Else
     end.
 
-copy_in(Fd, StreamBody, Location, Remaining) ->
-    copy_in(Fd, StreamBody, Location, Remaining, crypto:sha_init()).
-
-copy_in(Fd, {Bin, Next}, Location, Remaining, Sha) ->
-    Size = iolist_size(Bin),
-    case {Next, Remaining} of
-        {_, Remaining} when Remaining < Size ->
-            {error, overflow};
-        {done, Remaining} when Remaining > Size ->
-            {error, underflow};
-        _ ->
-            file:pwrite(Fd, Location, Bin),
-            Sha1 = crypto:sha_update(Sha, Bin),
-            case Next of
-                done ->
-                    {ok, crypto:sha_final(Sha1)};
-                _ ->
-                    copy_in(Fd, Next(), Location + Size, Remaining - Size, Sha1)
-            end
-    end.
-
-copy_out(_Fd, Fun, _Location, 0) ->
-    Fun(eof),
-    ok;
-copy_out(Fd, Fun, Location, Remaining) ->
-    case file:pread(Fd, Location, min(Remaining, ?BUFFER_SIZE)) of
+stream_out(Pid, Location, Remaining) ->
+    case gen_server:call(Pid, {read_hunk, Location, min(Remaining, ?BUFFER_SIZE)}) of
         {ok, Bin} ->
             Size = iolist_size(Bin),
-            Fun({ok, Bin}),
-            copy_out(Fd, Fun, Location + Size, Remaining - Size);
+            case Remaining - Size of
+                0 ->
+                    {Bin, done};
+                _ ->
+                    {Bin, fun() -> stream_out(Pid, Location + Size, Remaining - Size) end}
+            end;
         Else ->
-            Else
+            {<<>>, done}
+    end.
+
+info_int(Tid, Key, Cookie) ->
+   case ets:lookup(Tid, Key) of
+        [] ->
+            {error, not_found};
+        [{Key, Location, Size, Version}] ->
+            {ok, {Location, Size, Version}}
     end.
 
 cleanup(#state{tid=Tid,index_fd=IndexFd,main_fd=MainFd}=State) ->
@@ -257,4 +271,3 @@ close_ets(nil) ->
     ok;
 close_ets(Tid) ->
     ets:delete(Tid).
-
