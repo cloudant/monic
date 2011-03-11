@@ -95,7 +95,7 @@ add_item(ReqData, Context) ->
                 Size = list_to_integer(wrq:get_req_header("Content-Length", ReqData)),
                 StreamBody = wrq:stream_req_body(ReqData, ?BUFFER_SIZE),
                 case monic_file:add(Pid, Size, StreamBody) of
-                    {ok, Key, Cookie} ->
+                    {ok, {Key, Cookie}} ->
                         File = wrq:path_info(file, ReqData),
                         Location = io_lib:format("/~s/~B/~B",[File, Key, Cookie]),
                         ReqData1 = wrq:set_resp_header("Location", Location, ReqData),

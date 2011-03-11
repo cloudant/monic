@@ -112,7 +112,7 @@ handle_call({write, Ref, {Bin, Next}}, _From, #state{main_fd=Fd, write_pos=Pos, 
                             monic_utils:write_index(State#state.index_fd, Index),
                             ets:insert(State#state.tid, {Index#index.key, Index#index.location,
                                 Index#index.size, Index#index.version}),
-                            {reply, {ok, Index#index.key, Index#index.cookie},
+                            {reply, {ok, {Index#index.key, Index#index.cookie}},
                             State#state{next_index=nil, next_key=State#state.next_key+1,
                             reset_pos=Pos1, write_pos=Pos1, writer=nil}};
                         Else ->
