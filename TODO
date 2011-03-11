@@ -4,3 +4,6 @@
 * LastModified instead of Version
 * monic_file:new and monic_file:delete
 * keep monic_file servers alive.
+
+* allow client-supplied keys and allow them to be strings.
+** this means headers are variable length. :(

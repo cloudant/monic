@@ -5,17 +5,18 @@
 
 -record(index, {
     key,
+    cookie,
     location,
     size,
-    version,
+    version, %% last_modified,
     flags
 }).
 
 -record(header, {
     key,
-    cookie,
+    cookie,    
     size,
-    version,
+    version, %% last_modified,
     flags
 }).
 
