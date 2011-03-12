@@ -18,7 +18,7 @@
 -behavior(gen_server).
 
 %% public API
--export([new/2, update/2]).
+-export([start_link/2, update/2]).
 
 %% gen_server API
 -export([init/1, terminate/2, code_change/3,handle_call/3, handle_cast/2, handle_info/2]).
@@ -32,7 +32,7 @@
 
 %% public functions.
 
-new(Capacity, EvictionFun) when is_function(EvictionFun) ->
+start_link(Capacity, EvictionFun) when is_function(EvictionFun) ->
     gen_server:start_link(?MODULE, {Capacity, EvictionFun}, []).
 
 %% gen_server callbacks

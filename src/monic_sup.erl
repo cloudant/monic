@@ -62,5 +62,8 @@ init([]) ->
     Web = {webmachine_mochiweb,
            {webmachine_mochiweb, start, [WebConfig]},
            permanent, 5000, worker, dynamic},
-    Processes = [Web],
+    Lru = {monic_lru,
+            {monic_lru, start_link, [100, fun monic_file:close/1]},
+            permanent, 5000, worker, dynamic},
+    Processes = [Web, Lru],
     {ok, { {one_for_one, 10, 10}, Processes} }.
