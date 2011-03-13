@@ -23,6 +23,7 @@
 -export([init/1, terminate/2, code_change/3,handle_call/3, handle_cast/2, handle_info/2]).
 
 -record(state, {
+    data_start_pos,
     tid,
     index_fd=nil,
     main_fd=nil,    
@@ -103,7 +104,8 @@ handle_call({start_writing, Size}, _From,
     Index = #index{cookie=Cookie, key=Key, flags=Flags, location=Pos, size=Size, version=Version},
     case monic_utils:pwrite_header(MainFd, Pos, Header) of
         ok ->
-            {reply, {ok, Ref}, State#state{next_index=Index, write_pos=Pos + ?HEADER_SIZE, writer=Ref}};
+            {reply, {ok, Ref}, State#state{data_start_pos=Pos+?HEADER_SIZE,
+                next_index=Index, write_pos=Pos + ?HEADER_SIZE, writer=Ref}};
         Else ->
             {reply, Else, abandon_write(State)}
     end;
@@ -111,33 +113,33 @@ handle_call({start_writing, _Size}, _From, State) ->
     {reply, {error, already_writing}, State};
 
 handle_call({write, Ref, {Bin, Next}}, _From, #state{main_fd=Fd, write_pos=Pos, writer=Ref}=State) ->
-    case file:pwrite(Fd, Pos, Bin) of
-        ok ->
-            Pos1 = Pos + iolist_size(Bin),
-            case Next of
-                done ->
-                    Len = Pos1 - State#state.reset_pos,
-                    case Len < (State#state.next_index)#index.size of
-                        true ->
-                            {reply, {error, underflow}, abandon_write(State)};
-                        false ->
-                            case file:datasync(Fd) of
-                                ok ->
-                                    Index = State#state.next_index,
-                                    monic_utils:write_index(State#state.index_fd, Index),
-                                    ets:insert(State#state.tid, {Index#index.key, Index#index.cookie,
-                                    Index#index.location, Index#index.size, Index#index.version}),
-                                {reply, {ok, {Index#index.key, Index#index.cookie}},
-                                State#state{next_index=nil, next_key=State#state.next_key+1,
-                                reset_pos=Pos1, write_pos=Pos1, writer=nil}};
-                            Else ->
-                                {reply, Else, abandon_write(State)}
-                        end
-                    end;
-                Next ->
-                    {reply, {continue, Next}, State#state{write_pos=Pos1}}
-            end;
-        {Else, _} ->
+    Index = State#state.next_index,
+    Size = iolist_size(Bin),
+    Remaining = Index#index.size - (Pos + Size - State#state.data_start_pos),
+    Write = case {Next, Remaining} of
+        {_, Remaining} when Remaining < 0 ->
+            {error, overflow};
+        {done, Remaining} when Remaining > 0 ->
+            {error, underflow};
+        _ ->
+            file:pwrite(Fd, Pos, Bin)
+    end,
+    case {Next, Write} of
+        {done, ok} ->
+            case file:datasync(Fd) of
+                ok ->
+                    monic_utils:write_index(State#state.index_fd, Index),
+                    ets:insert(State#state.tid, {Index#index.key, Index#index.cookie,
+                        Index#index.location, Index#index.size, Index#index.version}),
+                    {reply, {ok, {Index#index.key, Index#index.cookie}},
+                        State#state{next_index=nil, next_key=State#state.next_key+1,
+                        reset_pos=Pos + Size, write_pos=Pos + Size, writer=nil}};
+                Else ->
+                    {reply, Else, abandon_write(State)}
+                end;
+        {_, ok} ->
+            {reply, {continue, Next}, State#state{write_pos=Pos + Size}};
+        {_, Else} ->
             {reply, Else, abandon_write(State)}
     end;
 handle_call({write, _Ref, _StreamBody}, _From, State) ->
