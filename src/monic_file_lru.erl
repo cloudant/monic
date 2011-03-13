@@ -12,48 +12,46 @@
 %% License for the specific language governing permissions and limitations under
 %% the License.
 
-%% Remove least recently used items when capacity is reached.
+%% Remove least recently used files when capacity is reached.
 
--module(monic_lru).
+-module(monic_file_lru).
 -behavior(gen_server).
 
 %% public API
--export([start_link/2, update/2]).
+-export([start_link/1, update/1]).
 
 %% gen_server API
 -export([init/1, terminate/2, code_change/3,handle_call/3, handle_cast/2, handle_info/2]).
 
 -record(state, {
     by_time,
-    by_item,
-    capacity,
-    eviction_fun
+    by_file,
+    capacity
 }).
 
 %% public functions.
 
-start_link(Capacity, EvictionFun) when is_function(EvictionFun) ->
-    gen_server:start_link(?MODULE, {Capacity, EvictionFun}, []).
+start_link(Capacity) when is_integer(Capacity) ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, Capacity, []).
+
+update(File) when is_pid(File) ->
+    gen_server:call(?MODULE, {update, File}).
 
 %% gen_server callbacks
 
 init({0, _}) ->
     {stop, capacity_too_low};
-init({Capacity, EvictionFun}) ->
+init(Capacity) ->
     State = #state{
         capacity = Capacity,
-        eviction_fun = EvictionFun,
-        by_item = ets:new(monic_by_item, [set, private]),
+        by_file = ets:new(monic_by_file, [set, private]),
         by_time = ets:new(monic_by_time, [ordered_set, private])
     },
     {ok, State}.
 
-update(Pid, Item) ->
-    gen_server:call(Pid, {update, Item}).
-
-handle_call({update, Item}, _From, State) ->
-    maybe_evict_items(State),
-    update_item(Item, State),
+handle_call({update, File}, _From, State) ->
+    maybe_evict_files(State),
+    update_file(File, State),
     {reply, ok, State}.
 
 handle_cast(_Msg, State) ->
@@ -62,33 +60,33 @@ handle_cast(_Msg, State) ->
 handle_info(_Info, State) ->
     {noreply, State}.
 
-terminate(_Reason, #state{by_item=ByItem,by_time=ByTime,eviction_fun=EvictionFun}) ->
-    lists:foreach(fun({Item, _}) -> EvictionFun(Item) end, ets:tab2list(ByItem)),
-    ets:delete(ByItem),
+terminate(_Reason, #state{by_file=ByFile,by_time=ByTime}) ->
+    lists:foreach(fun({File, _}) -> monic_file:close(File) end, ets:tab2list(ByFile)),
+    ets:delete(ByFile),
     ets:delete(ByTime).
 
 code_change(_OldVsn, State, _Extra) ->
   {ok, State}.
 
-maybe_evict_items(#state{by_item=ByItem, by_time=ByTime,
-    capacity=Capacity, eviction_fun=EvictionFun}) ->
-    case ets:info(ByItem, size) of
+maybe_evict_files(#state{by_file=ByFile, by_time=ByTime,
+    capacity=Capacity}) ->
+    case ets:info(ByFile, size) of
         Capacity ->
-            [{OldestTime, OldestItem}] = ets:lookup(ByTime, ets:first(ByTime)),
-            true = ets:delete(ByItem, OldestItem),
+            [{OldestTime, OldestFile}] = ets:lookup(ByTime, ets:first(ByTime)),
+            true = ets:delete(ByFile, OldestFile),
             true = ets:delete(ByTime, OldestTime),
-            EvictionFun(OldestItem);
+            monic_file:close(OldestFile);
         _ ->
             ok
     end.
 
-update_item(Item, #state{by_item=ByItem, by_time=ByTime}) ->
-    case ets:lookup(ByItem, Item) of
+update_file(File, #state{by_file=ByFile, by_time=ByTime}) ->
+    case ets:lookup(ByFile, File) of
         [{_, PrevTime}] ->
             true = ets:delete(ByTime, PrevTime);
         [] ->
             ok
     end,
     Now = now(),
-    true = ets:insert(ByItem, {Item, Now}),
-    true = ets:insert(ByTime, {Now, Item}).
+    true = ets:insert(ByFile, {File, Now}),
+    true = ets:insert(ByTime, {Now, File}).

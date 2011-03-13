@@ -13,7 +13,7 @@
 % the License.
 
 -module(monic_utils).
--export([path/2, exists/2]).
+-export([path/2, exists/2, open/2]).
 -export([pread_header/2, pwrite_header/3]).
 -export([pread_footer/2, pwrite_footer/3]).
 -export([read_index/1, write_index/2]).
@@ -28,6 +28,15 @@ path(ReqData, Context) ->
     Root = proplists:get_value(root, Context, "tmp"),
     File = wrq:path_info(file, ReqData),
     filename:join(Root, File).
+
+open(ReqData, Context) ->
+    case monic_file:open(path(ReqData, Context)) of
+        {ok, Pid} ->
+            monic_file_lru:update(Pid),
+            {ok, Pid};
+        Else ->
+            Else
+    end.
 
 exists(ReqData, Context) ->
     filelib:is_file(path(ReqData, Context)).

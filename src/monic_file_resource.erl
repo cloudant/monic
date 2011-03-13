@@ -89,7 +89,7 @@ create_file(ReqData, Context) ->
     end.
 
 add_item(ReqData, Context) ->
-    case monic_file:open(monic_utils:path(ReqData, Context)) of
+    case monic_utils:open(ReqData, Context) of
         {ok, Pid} ->
             Size = list_to_integer(wrq:get_req_header("Content-Length", ReqData)),
             StreamBody = wrq:stream_req_body(ReqData, ?BUFFER_SIZE),
