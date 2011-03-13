@@ -2,8 +2,7 @@
 * parallel reads
 * round-robin writing
 * LastModified instead of Version
-* monic_file:new and monic_file:delete
-* keep monic_file servers alive.
+* DELETE support
 * efficient range requests
 
 * allow client-supplied keys and allow them to be strings.
