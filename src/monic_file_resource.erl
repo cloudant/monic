@@ -1,28 +1,28 @@
-% Copyright 2011 Cloudant
-%
-% Licensed under the Apache License, Version 2.0 (the "License"); you may not
-% use this file except in compliance with the License. You may obtain a copy of
-% the License at
-%
-%   http://www.apache.org/licenses/LICENSE-2.0
-%
-% Unless required by applicable law or agreed to in writing, software
-% distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
-% WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
-% License for the specific language governing permissions and limitations under
-% the License.
+%% Copyright 2011 Cloudant
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License"); you may not
+%% use this file except in compliance with the License. You may obtain a copy of
+%% the License at
+%%
+%%   http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+%% WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+%% License for the specific language governing permissions and limitations under
+%% the License.
 
 -module(monic_file_resource).
 -export([init/1,
-    allowed_methods/2,
-    content_types_accepted/2,
-    content_types_provided/2,
-    create_path/2,
-    delete_resource/2,
-    is_conflict/2,
-    post_is_create/2,
-    resource_exists/2,
-    valid_entity_length/2]).
+         allowed_methods/2,
+         content_types_accepted/2,
+         content_types_provided/2,
+         create_path/2,
+         delete_resource/2,
+         is_conflict/2,
+         post_is_create/2,
+         resource_exists/2,
+         valid_entity_length/2]).
 -export([show_file/2, create_file/2, add_item/2]).
 
 -include_lib("webmachine/include/webmachine.hrl").
@@ -37,9 +37,9 @@ content_types_accepted(ReqData, Context) ->
             {[{"application/json", create_file}], ReqData, Context};
         'POST' ->
             CT = case wrq:get_req_header("Content-Type", ReqData) of
-                undefined -> "application/octet-stream";
-                Other -> Other
-            end,
+                     undefined -> "application/octet-stream";
+                     Other -> Other
+                 end,
             {[{CT, add_item}], ReqData, Context}
     end.
 
@@ -51,9 +51,9 @@ create_path(ReqData, Context) ->
 
 delete_resource(ReqData, Context) ->
     Result = case file:delete(monic_utils:path(ReqData, Context)) of
-        ok -> true;
-        _ -> false
-    end,
+                 ok -> true;
+                 _ -> false
+             end,
     {Result, ReqData, Context}.
 
 init(ConfigProps) ->
@@ -70,11 +70,11 @@ resource_exists(ReqData, Context) ->
 
 valid_entity_length(ReqData, Context) ->
     Valid = case wrq:method(ReqData) of
-        'POST' ->
-            wrq:get_req_header("Content-Length", ReqData) /= undefined;
-        _ ->
-            true
-    end,    
+                'POST' ->
+                    wrq:get_req_header("Content-Length", ReqData) /= undefined;
+                _ ->
+                    true
+            end,
     {Valid, ReqData, Context}.
 
 %% private functions

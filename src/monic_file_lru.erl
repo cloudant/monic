@@ -24,10 +24,10 @@
 -export([init/1, terminate/2, code_change/3,handle_call/3, handle_cast/2, handle_info/2]).
 
 -record(state, {
-    by_time,
-    by_file,
-    capacity
-}).
+          by_time,
+          by_file,
+          capacity
+         }).
 
 %% public functions.
 
@@ -43,10 +43,10 @@ init({0, _}) ->
     {stop, capacity_too_low};
 init(Capacity) ->
     State = #state{
-        capacity = Capacity,
-        by_file = ets:new(monic_by_file, [set, private]),
-        by_time = ets:new(monic_by_time, [ordered_set, private])
-    },
+      capacity = Capacity,
+      by_file = ets:new(monic_by_file, [set, private]),
+      by_time = ets:new(monic_by_time, [ordered_set, private])
+     },
     {ok, State}.
 
 handle_call({update, File}, _From, State) ->
@@ -66,10 +66,10 @@ terminate(_Reason, #state{by_file=ByFile,by_time=ByTime}) ->
     ets:delete(ByTime).
 
 code_change(_OldVsn, State, _Extra) ->
-  {ok, State}.
+    {ok, State}.
 
 maybe_evict_files(#state{by_file=ByFile, by_time=ByTime,
-    capacity=Capacity}) ->
+                         capacity=Capacity}) ->
     case ets:info(ByFile, size) of
         Capacity ->
             [{OldestTime, OldestFile}] = ets:lookup(ByTime, ets:first(ByTime)),
