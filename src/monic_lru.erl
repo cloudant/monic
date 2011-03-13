@@ -62,7 +62,8 @@ handle_cast(_Msg, State) ->
 handle_info(_Info, State) ->
     {noreply, State}.
 
-terminate(_Reason, #state{by_item=ByItem,by_time=ByTime}) ->
+terminate(_Reason, #state{by_item=ByItem,by_time=ByTime,eviction_fun=EvictionFun}) ->
+    lists:foreach(fun({Item, _}) -> EvictionFun(Item) end, ets:tab2list(ByItem)),
     ets:delete(ByItem),
     ets:delete(ByTime).
 
