@@ -36,29 +36,28 @@ add_single_hunk(Pid) ->
     {"add an item in one hunk",
     fun() ->
         StreamBody = {<<"123">>, done},
-        Result = monic_file:add(Pid, 3, StreamBody),
-        ?assertMatch({ok, _}, Result),
-        {ok, {Key, Cookie}} = Result,
-        ?assertMatch({ok, StreamBody}, monic_file:read(Pid, Key, Cookie))
+        Result = monic_file:add(Pid, <<"foo">>, 3, StreamBody),
+        {ok, Cookie} = Result,
+        ?assertMatch({ok, StreamBody}, monic_file:read(Pid, <<"foo">>, Cookie))
     end}.
 
 add_multi_hunk(Pid) ->
     {"add an item in multiple hunks",
     fun() ->
         StreamBody = {<<"123">>, fun() -> {<<"456">>, done} end},
-        ?assertMatch({ok, _}, monic_file:add(Pid, 6, StreamBody))
+        ?assertMatch({ok, _}, monic_file:add(Pid, <<"foo">>, 6, StreamBody))
     end}.
 
 add_multi_items(Pid) ->
-    [?_assertMatch({ok, _}, monic_file:add(Pid, 3, {<<"123">>, done})),
-    ?_assertMatch({ok, _}, monic_file:add(Pid, 3, {<<"456">>, done})),
-    ?_assertMatch({ok, _}, monic_file:add(Pid, 3, {<<"789">>, done})),
-    ?_assertMatch({ok, _}, monic_file:add(Pid, 3, {<<"abc">>, done}))].
+    [?_assertMatch({ok, _}, monic_file:add(Pid, <<"foo">>, 3, {<<"123">>, done})),
+    ?_assertMatch({ok, _}, monic_file:add(Pid, <<"bar">>, 3, {<<"456">>, done})),
+    ?_assertMatch({ok, _}, monic_file:add(Pid, <<"baz">>, 3, {<<"789">>, done})),
+    ?_assertMatch({ok, _}, monic_file:add(Pid, <<"foobar">>, 3, {<<"abc">>, done}))].
 
 overflow(Pid) ->
-    Res = monic_file:add(Pid, 3, {<<"1234">>, done}),
+    Res = monic_file:add(Pid, <<"foo">>, 3, {<<"1234">>, done}),
     ?_assertEqual({error, overflow}, Res).
 
 underflow(Pid) ->
-    Res = monic_file:add(Pid, 3, {<<"12">>, done}),
+    Res = monic_file:add(Pid, <<"foo">>, 3, {<<"12">>, done}),
     ?_assertEqual({error, underflow}, Res).

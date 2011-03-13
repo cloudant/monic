@@ -17,7 +17,7 @@
 -include("monic.hrl").
 
 %% public API
--export([open/1, open_new/1, close/1, add/3, info/3, read/3]).
+-export([open/1, open_new/1, close/1, add/4, info/3, read/3]).
 
 %% gen_server API
 -export([init/1, terminate/2, code_change/3,handle_call/3, handle_cast/2, handle_info/2]).
@@ -26,9 +26,8 @@
     data_start_pos,
     tid,
     index_fd=nil,
-    main_fd=nil,    
+    main_fd=nil,
     next_index,
-    next_key,
     reset_pos,
     write_pos,
     writer=nil
@@ -52,8 +51,8 @@ open_new(Path) ->
 close(Pid) ->
     gen_server:call(Pid, close, infinity).
 
-add(Pid, Size, StreamBody) ->
-    case gen_server:call(Pid, {start_writing, Size}) of
+add(Pid, Key, Size, StreamBody) when is_binary(Key) andalso is_integer(Size) ->
+    case gen_server:call(Pid, {start_writing, Key, Size}) of
         {ok, Ref} ->
             stream_in(Pid, Ref, StreamBody);
         Else ->
@@ -76,15 +75,14 @@ read(Pid, Key, Cookie) ->
 init(Path) ->
     Tid = ets:new(index, [set, private]),
     case load_index(Tid, Path) of
-        {ok, IndexFd, Hints} ->
-            case load_main(Tid, Path, Hints) of
-                {ok, MainFd, {NextKey, NextLocation}} ->
+        {ok, IndexFd, LastLoc} ->
+            case load_main(Tid, Path, LastLoc) of
+                {ok, MainFd, Eof} ->
                     {ok, #state{
                         index_fd=IndexFd,
                         main_fd=MainFd,
-                        next_key=NextKey,
-                        reset_pos=NextLocation,
-                        write_pos=NextLocation,                        
+                        reset_pos=Eof,
+                        write_pos=Eof,
                         tid=Tid
                     }};
                 Else ->
@@ -94,18 +92,17 @@ init(Path) ->
             {stop, Else}
     end.
 
-handle_call({start_writing, Size}, _From,
-    #state{main_fd=MainFd, next_key=Key, write_pos=Pos, writer=nil}=State) ->
+handle_call({start_writing, Key, Size}, _From,
+    #state{main_fd=MainFd, write_pos=Pos, writer=nil}=State) ->
     Ref = make_ref(),
     Cookie = monic_utils:new_cookie(),
-    Flags = <<0:16>>,
-    Version = 1,
-    Header = #header{cookie=Cookie, flags=Flags, key=Key, size=Size, version=Version},
-    Index = #index{cookie=Cookie, key=Key, flags=Flags, location=Pos, size=Size, version=Version},
-    case monic_utils:pwrite_header(MainFd, Pos, Header) of
-        ok ->
-            {reply, {ok, Ref}, State#state{data_start_pos=Pos+?HEADER_SIZE,
-                next_index=Index, write_pos=Pos + ?HEADER_SIZE, writer=Ref}};
+    LastModified = now(),
+    Header = #header{cookie=Cookie, key=Key, size=Size, last_modified=LastModified},
+    Index = #index{cookie=Cookie, key=Key, location=Pos, size=Size, last_modified=LastModified},
+    case monic_utils:pwrite_term(MainFd, Pos, Header) of
+        {ok, HeaderSize} ->
+            {reply, {ok, Ref}, State#state{data_start_pos=Pos + HeaderSize,
+                next_index=Index, write_pos=Pos + HeaderSize, writer=Ref}};
         Else ->
             {reply, Else, abandon_write(State)}
     end;
@@ -128,12 +125,13 @@ handle_call({write, Ref, {Bin, Next}}, _From, #state{main_fd=Fd, write_pos=Pos, 
         {done, ok} ->
             case file:datasync(Fd) of
                 ok ->
-                    monic_utils:write_index(State#state.index_fd, Index),
+                    {ok, IndexPos} = file:position(Fd, cur), %% TODO track this in state.
+                    monic_utils:pwrite_term(State#state.index_fd, IndexPos, Index),
                     ets:insert(State#state.tid, {Index#index.key, Index#index.cookie,
-                        Index#index.location, Index#index.size, Index#index.version}),
-                    {reply, {ok, {Index#index.key, Index#index.cookie}},
-                        State#state{next_index=nil, next_key=State#state.next_key+1,
-                        reset_pos=Pos + Size, write_pos=Pos + Size, writer=nil}};
+                        Index#index.location, Index#index.size, Index#index.last_modified}),
+                    {reply, {ok, Index#index.cookie},
+                        State#state{next_index=nil, reset_pos=Pos + Size,
+                            write_pos=Pos + Size, writer=nil}};
                 Else ->
                     {reply, Else, abandon_write(State)}
                 end;
@@ -145,11 +143,12 @@ handle_call({write, Ref, {Bin, Next}}, _From, #state{main_fd=Fd, write_pos=Pos, 
 handle_call({write, _Ref, _StreamBody}, _From, State) ->
     {reply, {error, not_writing}, State};
 
-handle_call({read, Key, Cookie}, _From, #state{tid=Tid}=State) ->
+handle_call({read, Key, Cookie}, _From, #state{main_fd=Fd, tid=Tid}=State) ->
     case info_int(Tid, Key, Cookie) of
-        {ok, {Location, Size, _Version}} ->
+        {ok, {Location, Size, _LastModified}} ->
+            {ok, HeaderSize, _} = monic_utils:pread_term(Fd, Location),
             Self = self(),
-            {reply, {ok, fun() -> stream_out(Self, Location + ?HEADER_SIZE, Size) end}, State};
+            {reply, {ok, fun() -> stream_out(Self, Location + HeaderSize, Size) end}, State};
         Else ->
             {reply, Else, State}
     end;
@@ -177,11 +176,11 @@ code_change(_OldVsn, State, _Extra) ->
 %% private functions
 
 load_index(Tid, Path) ->
-    case file:open(Path ++ ".idx", [binary, raw, read, write, append]) of
+    case file:open(Path ++ ".idx", [binary, raw, read, write]) of
         {ok, Fd} ->
             case load_index_items(Tid, Fd) of
-                {ok, Hints} ->
-                    {ok, Fd, Hints};
+                {ok, LastLoc} ->
+                    {ok, Fd, LastLoc};
                 Else ->
                     Else
             end;
@@ -190,28 +189,29 @@ load_index(Tid, Path) ->
     end.
 
 load_index_items(Tid, Fd) ->
-    load_index_items(Tid, Fd, {0, 0}).
+    load_index_items(Tid, Fd, 0, 0).
 
-load_index_items(Tid, Fd, Hints) ->
-    case monic_utils:read_index(Fd) of
-        {ok, #index{key=Key,cookie=Cookie,location=Location,size=Size,version=Version,flags= <<Deleted:1,_:15>>}} ->
+load_index_items(Tid, Fd, IndexLocation, LastLoc) ->
+    case monic_utils:pread_term(Fd, IndexLocation) of
+        {ok, IndexSize, #index{key=Key,cookie=Cookie,location=Location,size=Size,
+            last_modified=LastModified,deleted=Deleted}} ->
             case Deleted of
-                0 -> ets:insert(Tid, {Key, Cookie, Location, Size, Version});
-                1 -> ets:delete(Tid, Key)
+                false -> ets:insert(Tid, {Key, Cookie, Location, Size, LastModified});
+                true -> ets:delete(Tid, Key)
             end,
-            load_index_items(Tid, Fd, {Key + 1, Location + Size + ?HEADER_SIZE + ?FOOTER_SIZE});
+            load_index_items(Tid, Fd, IndexLocation + IndexSize, Location);
         eof ->
-            {ok, Hints};
+            {ok, LastLoc};
         Else ->
             Else
     end.
 
-load_main(Tid, Path, Hints) ->
+load_main(Tid, Path, LastLoc) ->
     case file:open(Path, [binary, raw, read, write]) of
         {ok, Fd} ->
-            case load_main_items(Tid, Fd, Hints) of
-                {ok, Hints} ->
-                    {ok, Fd, Hints};
+            case load_main_items(Tid, Fd, LastLoc) of
+                {ok, Eof} ->
+                    {ok, Fd, Eof};
                 Else ->
                     Else
             end;
@@ -219,16 +219,17 @@ load_main(Tid, Path, Hints) ->
             Else
     end.
 
-load_main_items(Tid, Fd, {_, Location}=Hints) ->
-    case monic_utils:pread_header(Fd, Location) of
-        {ok, #header{key=Key,cookie=Cookie,size=Size,version=Version,flags= <<Deleted:1,_:15>>}} ->
+load_main_items(Tid, Fd, Location) ->
+    case monic_utils:pread_term(Fd, Location) of
+        {ok, HeaderSize, #header{key=Key,cookie=Cookie,size=Size,last_modified=LastModified,deleted=Deleted}} ->
             case Deleted of
-                0 -> ets:insert(Tid, {Key, Cookie, Location, Size, Version});
-                1 -> ets:delete(Tid, Key)
+                false -> ets:insert(Tid, {Key, Cookie, Location, Size, LastModified});
+                true -> ets:delete(Tid, Key)
             end,
-            load_main_items(Tid, Fd, {Key + 1, Location + Size + ?HEADER_SIZE + ?FOOTER_SIZE});
+            {ok, FooterSize, _} = monic_utils:pread_term(Fd, Location + HeaderSize + Size),
+            load_main_items(Tid, Fd, Location + HeaderSize + Size + FooterSize);
         eof ->
-            {ok, Hints};
+            {ok, Location};
         Else ->
             Else
     end.
@@ -244,8 +245,8 @@ abandon_write(#state{main_fd=Fd, reset_pos=Pos}=State) ->
 
 stream_in(Pid, Ref, StreamBody) ->
     case gen_server:call(Pid, {write, Ref, StreamBody}, infinity) of
-        {ok, Key, Cookie} ->
-            {ok, Key, Cookie};
+        {ok, Cookie} ->
+            {ok, Cookie};
         {continue, Next} ->
             stream_in(Pid, Ref, Next());
         Else ->
