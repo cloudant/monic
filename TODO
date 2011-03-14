@@ -1,9 +1,5 @@
 * compaction
-* parallel reads
 * round-robin writing
 * DELETE support
 * efficient range requests
 * remember Content-Type
-
-* allow client-supplied keys and allow them to be strings.
-** this means headers are variable length. :(
