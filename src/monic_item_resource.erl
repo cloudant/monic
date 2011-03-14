@@ -17,6 +17,7 @@
     allowed_methods/2,
     content_types_accepted/2,
     content_types_provided/2,
+    last_modified/2,
     resource_exists/2,
     valid_entity_length/2]).
 -export([get_item/2, put_item/2]).
@@ -37,6 +38,22 @@ content_types_provided(ReqData, Context) ->
 
 content_types_accepted(ReqData, Context) ->
     {[{?ITEM_MIME_TYPE, put_item}], ReqData, Context}.
+
+last_modified(ReqData, Context) ->
+    Key = wrq:path_info(key, ReqData),
+    Cookie = list_to_integer(wrq:path_info(cookie, ReqData)),
+    LastModified1 = case monic_utils:open(ReqData, Context) of
+        {ok, Pid} ->
+            case monic_file:info(Pid, Key, Cookie) of
+                {ok, {_, _, LastModified}} ->
+                    LastModified;
+                {error, not_found} ->
+                    undefined
+            end;
+        _ ->
+            undefined
+    end,
+    {LastModified1, ReqData, Context}.
 
 resource_exists(ReqData, Context) ->
     Key = wrq:path_info(key, ReqData),

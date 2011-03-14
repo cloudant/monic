@@ -1,7 +1,6 @@
 * compaction
 * parallel reads
 * round-robin writing
-* LastModified instead of Version
 * DELETE support
 * efficient range requests
 * remember Content-Type

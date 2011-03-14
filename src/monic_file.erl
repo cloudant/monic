@@ -102,7 +102,7 @@ init(Path) ->
 handle_call({start_writing, Key, Cookie, Size}, _From,
             #state{main_fd=MainFd, write_pos=Pos, writer=nil}=State) ->
     Ref = make_ref(),
-    LastModified = now(),
+    LastModified = erlang:universaltime(),
     Header = #header{cookie=Cookie, key=Key, size=Size, last_modified=LastModified},
     Index = #index{cookie=Cookie, key=Key, location=Pos, size=Size, last_modified=LastModified},
     case monic_utils:pwrite_term(MainFd, Pos, Header) of
