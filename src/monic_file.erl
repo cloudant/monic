@@ -242,22 +242,27 @@ load_main_items(Tid, Fd, Location) ->
                 {ok, FooterSize, _} ->
                     load_main_items(Tid, Fd, Location + HeaderSize + Size + FooterSize);
                 eof ->
+                    truncate(Fd, Location),
                     {ok, Location}
             end;
         eof ->
+            truncate(Fd, Location),
             {ok, Location};
         Else ->
             Else
     end.
 
 abandon_write(#state{main_fd=Fd, reset_pos=Pos}=State) ->
+    truncate(Fd, Pos),
+    State#state{write_pos=Pos, writer=nil}.
+
+truncate(Fd, Pos) ->
     case file:position(Fd, Pos) of
         {ok, Pos} ->
-            file:truncate(Fd);
-        _ ->
-            ok
-    end,
-    State#state{write_pos=Pos, writer=nil}.
+            file:position(Fd, Pos);
+        Else ->
+            Else
+    end.
 
 stream_in(Pid, Ref, StreamBody) ->
     case gen_server:call(Pid, {write, Ref, StreamBody}, infinity) of
