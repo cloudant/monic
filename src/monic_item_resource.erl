@@ -15,24 +15,31 @@
 -module(monic_item_resource).
 -export([init/1,
     allowed_methods/2,
+    content_types_accepted/2,
     content_types_provided/2,
-    resource_exists/2]).
--export([fetch/2]).
+    resource_exists/2,
+    valid_entity_length/2]).
+-export([get_item/2, put_item/2]).
 
 -include_lib("webmachine/include/webmachine.hrl").
 -include("monic.hrl").
 
-allowed_methods(ReqData, Context) ->
-    {['GET'], ReqData, Context}.
-
-content_types_provided(ReqData, Context) ->
-    {[{"application/octet-stream", fetch}], ReqData, Context}.
+-define(ITEM_MIME_TYPE, "application/octet-stream").
 
 init(ConfigProps) ->
     {ok, ConfigProps}.
 
+allowed_methods(ReqData, Context) ->
+    {['GET', 'PUT'], ReqData, Context}.
+
+content_types_provided(ReqData, Context) ->
+    {[{?ITEM_MIME_TYPE, get_item}], ReqData, Context}.
+
+content_types_accepted(ReqData, Context) ->
+    {[{?ITEM_MIME_TYPE, put_item}], ReqData, Context}.
+
 resource_exists(ReqData, Context) ->
-    Key = list_to_integer(wrq:path_info(key, ReqData)),
+    Key = wrq:path_info(key, ReqData),
     Cookie = list_to_integer(wrq:path_info(cookie, ReqData)),
     Exists = case monic_utils:open(ReqData, Context) of
         {ok, Pid} ->
@@ -47,8 +54,19 @@ resource_exists(ReqData, Context) ->
     end,
     {Exists, ReqData, Context}.
 
-fetch(ReqData, Context) ->
-    Key = list_to_integer(wrq:path_info(key, ReqData)),
+valid_entity_length(ReqData, Context) ->
+     Valid = case wrq:method(ReqData) of
+        'PUT' ->
+            wrq:get_req_header("Content-Length", ReqData) /= undefined;
+        _ ->
+            true
+    end,
+    {Valid, ReqData, Context}.
+
+%% private functions
+
+get_item(ReqData, Context) ->
+    Key = wrq:path_info(key, ReqData),
     Cookie = list_to_integer(wrq:path_info(cookie, ReqData)),
     case monic_utils:open(ReqData, Context) of
         {ok, Pid} ->
@@ -56,4 +74,24 @@ fetch(ReqData, Context) ->
             {{stream, StreamBody}, ReqData, Context};
         _ ->
             {<<>>, ReqData, Context}
+    end.
+
+put_item(ReqData, Context) ->
+    Key = wrq:path_info(key, ReqData),
+    Cookie = list_to_integer(wrq:path_info(cookie, ReqData)),
+    case monic_utils:open(ReqData, Context) of
+        {ok, Pid} ->
+            Size = list_to_integer(wrq:get_req_header("Content-Length", ReqData)),
+            StreamBody = wrq:stream_req_body(ReqData, ?BUFFER_SIZE),
+            case monic_file:add(Pid, Key, Cookie, Size, StreamBody) of
+                ok ->
+                    File = wrq:path_info(file, ReqData),
+                    Location = io_lib:format("/~s/~B/~s",[File, Cookie, Key]),
+                    ReqData1 = wrq:set_resp_header("Location", Location, ReqData),
+                    {true, ReqData1, Context};
+                _ ->
+                    {false, ReqData, Context}
+            end;
+        _ ->
+            {false, ReqData, Context}
     end.

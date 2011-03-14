@@ -17,7 +17,7 @@
 -include("monic.hrl").
 
 %% public API
--export([open/1, open_new/1, close/1, add/4, info/3, read/3]).
+-export([open/1, open_new/1, close/1, add/5, info/3, read/3]).
 
 %% gen_server API
 -export([init/1, terminate/2, code_change/3,handle_call/3, handle_cast/2, handle_info/2]).
@@ -29,12 +29,16 @@
           main_fd=nil,
           next_index,
           reset_pos,
+          sha,
           write_pos,
           writer=nil
          }).
 
+-type streambody() :: fun((binary(), fun() | done) -> streambody()).
+
 %% public functions
 
+-spec open(list()) -> {ok, pid()} | {error, term()}.
 open(Path) ->
     case open_new(Path) of
         {ok, Pid} ->
@@ -51,17 +55,20 @@ open_new(Path) ->
 close(Pid) ->
     gen_server:call(Pid, close, infinity).
 
-add(Pid, Key, Size, StreamBody) when is_binary(Key) andalso is_integer(Size) ->
-    case gen_server:call(Pid, {start_writing, Key, Size}) of
+-spec add(pid(), binary(), integer(), integer(), streambody()) -> ok | {error, term()}.
+add(Pid, Key, Cookie, Size, StreamBody) ->
+    case gen_server:call(Pid, {start_writing, Key, Cookie, Size}) of
         {ok, Ref} ->
             stream_in(Pid, Ref, StreamBody);
         Else ->
             Else
     end.
 
+-spec info(pid(), binary(), integer()) -> {ok, {integer(), integer(), integer()}} | {error, term()}.
 info(Pid, Key, Cookie) ->
     gen_server:call(Pid, {info, Key, Cookie}).
 
+-spec read(pid(), binary(), integer()) -> ok | {error, term()}.
 read(Pid, Key, Cookie) ->
     case gen_server:call(Pid, {read, Key, Cookie}) of
         {ok, StreamBodyFun} ->
@@ -92,24 +99,23 @@ init(Path) ->
             {stop, Else}
     end.
 
-handle_call({start_writing, Key, Size}, _From,
+handle_call({start_writing, Key, Cookie, Size}, _From,
             #state{main_fd=MainFd, write_pos=Pos, writer=nil}=State) ->
     Ref = make_ref(),
-    Cookie = monic_utils:new_cookie(),
     LastModified = now(),
     Header = #header{cookie=Cookie, key=Key, size=Size, last_modified=LastModified},
     Index = #index{cookie=Cookie, key=Key, location=Pos, size=Size, last_modified=LastModified},
     case monic_utils:pwrite_term(MainFd, Pos, Header) of
         {ok, HeaderSize} ->
-            {reply, {ok, Ref}, State#state{data_start_pos=Pos + HeaderSize,
+            {reply, {ok, Ref}, State#state{data_start_pos=Pos + HeaderSize, sha=crypto:sha_init(),
                                            next_index=Index, write_pos=Pos + HeaderSize, writer=Ref}};
         Else ->
             {reply, Else, abandon_write(State)}
     end;
-handle_call({start_writing, _Size}, _From, State) ->
+handle_call({start_writing, _Key, _Cookie, _Size}, _From, State) ->
     {reply, {error, already_writing}, State};
 
-handle_call({write, Ref, {Bin, Next}}, _From, #state{main_fd=Fd, write_pos=Pos, writer=Ref}=State) ->
+handle_call({write, Ref, {Bin, Next}}, _From, #state{main_fd=Fd, sha=Sha, write_pos=Pos, writer=Ref}=State) ->
     Index = State#state.next_index,
     Size = iolist_size(Bin),
     Remaining = Index#index.size - (Pos + Size - State#state.data_start_pos),
@@ -121,22 +127,28 @@ handle_call({write, Ref, {Bin, Next}}, _From, #state{main_fd=Fd, write_pos=Pos, 
                 _ ->
                     file:pwrite(Fd, Pos, Bin)
             end,
+    Sha1 = crypto:sha_update(Sha, Bin),
     case {Next, Write} of
         {done, ok} ->
-            case file:datasync(Fd) of
-                ok ->
-                    {ok, IndexPos} = file:position(Fd, cur), %% TODO track this in state.
-                    monic_utils:pwrite_term(State#state.index_fd, IndexPos, Index),
-                    ets:insert(State#state.tid, {Index#index.key, Index#index.cookie,
-                                                 Index#index.location, Index#index.size, Index#index.last_modified}),
-                    {reply, {ok, Index#index.cookie},
-                     State#state{next_index=nil, reset_pos=Pos + Size,
-                                 write_pos=Pos + Size, writer=nil}};
+            Footer = #footer{sha=crypto:sha_final(Sha1)},
+            case monic_utils:pwrite_term(Fd, Pos + Size, Footer) of
+                {ok, FooterSize} ->
+                    case file:datasync(Fd) of
+                        ok ->
+                            {ok, IndexPos} = file:position(Fd, cur), %% TODO track this in state.
+                            monic_utils:pwrite_term(State#state.index_fd, IndexPos, Index),
+                            ets:insert(State#state.tid, {Index#index.key, Index#index.cookie,
+                                Index#index.location, Index#index.size, Index#index.last_modified}),
+                            {reply, ok, State#state{next_index=nil, reset_pos=Pos + Size + FooterSize,
+                                write_pos=Pos + Size + FooterSize, writer=nil}};
+                        Else ->
+                            {reply, Else, abandon_write(State)}
+                    end;
                 Else ->
                     {reply, Else, abandon_write(State)}
             end;
         {_, ok} ->
-            {reply, {continue, Next}, State#state{write_pos=Pos + Size}};
+            {reply, {continue, Next}, State#state{sha=Sha1, write_pos=Pos + Size}};
         {_, Else} ->
             {reply, Else, abandon_write(State)}
     end;
@@ -226,8 +238,12 @@ load_main_items(Tid, Fd, Location) ->
                 false -> ets:insert(Tid, {Key, Cookie, Location, Size, LastModified});
                 true -> ets:delete(Tid, Key)
             end,
-            {ok, FooterSize, _} = monic_utils:pread_term(Fd, Location + HeaderSize + Size),
-            load_main_items(Tid, Fd, Location + HeaderSize + Size + FooterSize);
+            case monic_utils:pread_term(Fd, Location + HeaderSize + Size) of
+                {ok, FooterSize, _} ->
+                    load_main_items(Tid, Fd, Location + HeaderSize + Size + FooterSize);
+                eof ->
+                    {ok, Location}
+            end;
         eof ->
             {ok, Location};
         Else ->

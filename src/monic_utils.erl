@@ -15,7 +15,6 @@
 -module(monic_utils).
 -export([path/2, exists/2, open/2]).
 -export([pwrite_term/3, pread_term/2]).
--export([new_cookie/0]).
 
 -include("monic.hrl").
 
@@ -65,6 +64,3 @@ pread_term(Fd, Location) ->
         Else ->
             Else
     end.
-
-new_cookie() ->
-    crypto:rand_uniform(0, 1 bsl 32).
