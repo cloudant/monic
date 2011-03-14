@@ -34,7 +34,7 @@
           writer=nil
          }).
 
--type streambody() :: fun((binary(), fun() | done) -> streambody()).
+-type streambody() :: fun(({binary(), fun() | done}) -> streambody()).
 
 %% public functions
 
