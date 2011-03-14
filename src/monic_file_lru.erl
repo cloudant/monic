@@ -49,9 +49,32 @@ init(Capacity) ->
      },
     {ok, State}.
 
-handle_call({update, File}, _From, State) ->
-    maybe_evict_files(State),
-    update_file(File, State),
+handle_call({update, File}, _From,  #state{by_file=ByFile,by_time=ByTime,capacity=Capacity}=State) ->
+    %% evict oldest item if at capacity and it's not the item we're updating right now.
+    case ets:info(ByFile, size) of
+        Capacity ->
+            [{OldestTime, OldestFile}] = ets:lookup(ByTime, ets:first(ByTime)),
+            case OldestFile of
+                File ->
+                    ok;
+                _ ->
+                    true = ets:delete(ByFile, OldestFile),
+                    true = ets:delete(ByTime, OldestTime),
+                    monic_file:close(OldestFile)
+            end;
+        _ ->
+            ok
+    end,
+    %% update the item.
+    case ets:lookup(ByFile, File) of
+        [{_, PrevTime}] ->
+            true = ets:delete(ByTime, PrevTime);
+        [] ->
+            ok
+    end,
+    Now = now(),
+    true = ets:insert(ByFile, {File, Now}),
+    true = ets:insert(ByTime, {Now, File}),
     {reply, ok, State}.
 
 handle_cast(_Msg, State) ->
@@ -67,26 +90,3 @@ terminate(_Reason, #state{by_file=ByFile,by_time=ByTime}) ->
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-
-maybe_evict_files(#state{by_file=ByFile, by_time=ByTime,
-                         capacity=Capacity}) ->
-    case ets:info(ByFile, size) of
-        Capacity ->
-            [{OldestTime, OldestFile}] = ets:lookup(ByTime, ets:first(ByTime)),
-            true = ets:delete(ByFile, OldestFile),
-            true = ets:delete(ByTime, OldestTime),
-            monic_file:close(OldestFile);
-        _ ->
-            ok
-    end.
-
-update_file(File, #state{by_file=ByFile, by_time=ByTime}) ->
-    case ets:lookup(ByFile, File) of
-        [{_, PrevTime}] ->
-            true = ets:delete(ByTime, PrevTime);
-        [] ->
-            ok
-    end,
-    Now = now(),
-    true = ets:insert(ByFile, {File, Now}),
-    true = ets:insert(ByTime, {Now, File}).
