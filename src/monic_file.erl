@@ -84,7 +84,7 @@ read(Pid, Key, Cookie) ->
 %% gen_server functions
 
 init(Path) ->
-    Tid = ets:new(index, [set, private]),
+    Tid = ets:new(index, [{keypos, 2}, set, private]),
     case load_index(Tid, Path) of
         {ok, IndexFd, LastLoc} ->
             case load_main(Tid, Path, LastLoc) of
@@ -119,8 +119,7 @@ handle_call({start_writing, Key, Cookie, Size}, _From,
 handle_call({start_writing, _Key, _Cookie, _Size}, _From, State) ->
     {reply, {error, already_writing}, State};
 
-handle_call({write, Ref, {Bin, Next}}, _From, #state{main_fd=Fd, sha=Sha, write_pos=Pos, writer=Ref}=State) ->
-    Index = State#state.next_index,
+handle_call({write, Ref, {Bin, Next}}, _From, #state{next_index=Index, main_fd=Fd, sha=Sha, write_pos=Pos, writer=Ref}=State) ->
     Size = iolist_size(Bin),
     Remaining = Index#index.size - (Pos + Size - State#state.data_start_pos),
     Write = case {Next, Remaining} of
@@ -141,8 +140,7 @@ handle_call({write, Ref, {Bin, Next}}, _From, #state{main_fd=Fd, sha=Sha, write_
                         ok ->
                             {ok, IndexPos} = file:position(Fd, cur), %% TODO track this in state.
                             monic_utils:pwrite_term(State#state.index_fd, IndexPos, Index),
-                            ets:insert(State#state.tid, {Index#index.key, Index#index.cookie,
-                                Index#index.location, Index#index.size, Index#index.last_modified}),
+                            ets:insert(State#state.tid, Index),
                             {reply, ok, State#state{next_index=nil, reset_pos=Pos + Size + FooterSize,
                                 write_pos=Pos + Size + FooterSize, writer=nil}};
                         Else ->
@@ -230,27 +228,26 @@ load_index(Tid, Path) ->
 load_index_items(Tid, Fd) ->
     load_index_items(Tid, Fd, 0, 0).
 
-load_index_items(Tid, Fd, IndexLocation, LastLoc) ->
+load_index_items(Tid, Fd, IndexLocation, Eof) ->
     case monic_utils:pread_term(Fd, IndexLocation) of
-        {ok, IndexSize, #index{key=Key,cookie=Cookie,location=Location,size=Size,
-                               last_modified=LastModified,deleted=Deleted}} ->
+        {ok, IndexSize, #index{deleted=Deleted,key=Key,location=Location}=Index} ->
             case Deleted of
-                false -> ets:insert(Tid, {Key, Cookie, Location, Size, LastModified});
+                false -> ets:insert(Tid, Index);
                 true -> ets:delete(Tid, Key)
             end,
             load_index_items(Tid, Fd, IndexLocation + IndexSize, Location);
         eof ->
-            {ok, LastLoc};
+            {ok, Eof};
         Else ->
             Else
     end.
 
-load_main(Tid, Path, LastLoc) ->
+load_main(Tid, Path, Eof) ->
     case file:open(Path, [binary, raw, read, append]) of
         {ok, Fd} ->
-            case load_main_items(Tid, Fd, LastLoc) of
-                {ok, Eof} ->
-                    {ok, Fd, Eof};
+            case load_main_items(Tid, Fd, Eof) of
+                {ok, Eof1} ->
+                    {ok, Fd, Eof1};
                 Else ->
                     Else
             end;
@@ -260,10 +257,10 @@ load_main(Tid, Path, LastLoc) ->
 
 load_main_items(Tid, Fd, Location) ->
     case monic_utils:pread_term(Fd, Location) of
-        {ok, HeaderSize, #header{key=Key,cookie=Cookie,size=Size,last_modified=LastModified,deleted=Deleted}} ->
+        {ok, HeaderSize, #header{deleted=Deleted,key=Key,size=Size}=Header} ->
             case Deleted of
                 false ->
-                    ets:insert(Tid, {Key, Cookie, Location, Size, LastModified}),
+                    ets:insert(Tid, monic_utils:header_to_index(Header)),
                     case monic_utils:pread_term(Fd, Location + HeaderSize + Size) of
                         {ok, FooterSize, _} ->
                             load_main_items(Tid, Fd, Location + HeaderSize + Size + FooterSize);
@@ -321,8 +318,8 @@ stream_out(Pid, Location, Remaining) ->
 
 info_int(Tid, Key, Cookie) ->
     case ets:lookup(Tid, Key) of
-        [{Key, Cookie, Location, Size, Version}] ->
-            {ok, {Location, Size, Version}};
+        [#index{cookie=Cookie,location=Location,size=Size,last_modified=LastModified}] ->
+            {ok, {Location, Size, LastModified}};
         _ ->
             {error, not_found}
     end.
