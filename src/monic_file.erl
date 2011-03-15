@@ -17,7 +17,7 @@
 -include("monic.hrl").
 
 %% public API
--export([open/1, open_new/1, close/1, add/5, info/3, read/3]).
+-export([open/1, open_new/1, close/1, add/5, delete/3, info/3, read/3]).
 
 %% gen_server API
 -export([init/1, terminate/2, code_change/3,handle_call/3, handle_cast/2, handle_info/2]).
@@ -63,6 +63,10 @@ add(Pid, Key, Cookie, Size, StreamBody) ->
         Else ->
             Else
     end.
+
+-spec delete(pid(), binary(), integer()) -> boolean().
+delete(Pid, Key, Cookie) ->
+    gen_server:call(Pid, {delete, Key, Cookie}, infinity).
 
 -spec info(pid(), binary(), integer()) -> {ok, {integer(), integer(), integer()}} | {error, term()}.
 info(Pid, Key, Cookie) ->
@@ -167,6 +171,29 @@ handle_call({read, Key, Cookie}, _From, #state{main_fd=Fd, tid=Tid}=State) ->
 handle_call({read_hunk, Location, Size}, _From, #state{main_fd=Fd}=State) ->
     {reply, file:pread(Fd, Location, Size), State};
 
+handle_call({delete, Key, Cookie}, _From, #state{tid=Tid,main_fd=MainFd,index_fd=IndexFd,write_pos=Pos}=State) ->
+    case info_int(Tid, Key, Cookie) of
+        {ok, _} ->
+            case monic_utils:pwrite_term(MainFd, Pos, #header{key=Key,cookie=Cookie,deleted=true}) of
+                {ok, HeaderSize} ->
+                    case file:datasync(MainFd) of
+                        ok ->
+                            {ok, IndexPos} = file:position(IndexFd, cur), %% TODO track this in state.
+                            monic_utils:pwrite_term(IndexFd, IndexPos, #index{location=Pos,key=Key,
+                                cookie=Cookie,deleted=true}),
+                            {reply, ets:delete(Tid, Key), State#state{
+                                reset_pos=Pos+HeaderSize,
+                                write_pos=Pos+HeaderSize}};
+                        Else ->
+                            {reply, Else, abandon_write(State)}
+                    end;
+                Else ->
+                    {reply, Else, abandon_write(State)}
+            end;
+        Else ->
+            {reply, Else, abandon_write(State)}
+    end;
+
 handle_call({info, Key, Cookie}, _From, #state{tid=Tid}=State) ->
     {reply, info_int(Tid, Key, Cookie), State};
 
@@ -235,15 +262,18 @@ load_main_items(Tid, Fd, Location) ->
     case monic_utils:pread_term(Fd, Location) of
         {ok, HeaderSize, #header{key=Key,cookie=Cookie,size=Size,last_modified=LastModified,deleted=Deleted}} ->
             case Deleted of
-                false -> ets:insert(Tid, {Key, Cookie, Location, Size, LastModified});
-                true -> ets:delete(Tid, Key)
-            end,
-            case monic_utils:pread_term(Fd, Location + HeaderSize + Size) of
-                {ok, FooterSize, _} ->
-                    load_main_items(Tid, Fd, Location + HeaderSize + Size + FooterSize);
-                eof ->
-                    truncate(Fd, Location),
-                    {ok, Location}
+                false ->
+                    ets:insert(Tid, {Key, Cookie, Location, Size, LastModified}),
+                    case monic_utils:pread_term(Fd, Location + HeaderSize + Size) of
+                        {ok, FooterSize, _} ->
+                            load_main_items(Tid, Fd, Location + HeaderSize + Size + FooterSize);
+                        eof ->
+                            truncate(Fd, Location),
+                            {ok, Location}
+                    end;
+                true ->
+                    ets:delete(Tid, Key),
+                    load_main_items(Tid, Fd, Location + HeaderSize)
             end;
         eof ->
             truncate(Fd, Location),
