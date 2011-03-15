@@ -215,7 +215,7 @@ code_change(_OldVsn, State, _Extra) ->
 %% private functions
 
 load_index(Tid, Path) ->
-    case file:open(Path ++ ".idx", [binary, raw, read, write]) of
+    case file:open(Path ++ ".idx", [binary, raw, read, append]) of
         {ok, Fd} ->
             case load_index_items(Tid, Fd) of
                 {ok, LastLoc} ->
@@ -246,7 +246,7 @@ load_index_items(Tid, Fd, IndexLocation, LastLoc) ->
     end.
 
 load_main(Tid, Path, LastLoc) ->
-    case file:open(Path, [binary, raw, read, write]) of
+    case file:open(Path, [binary, raw, read, append]) of
         {ok, Fd} ->
             case load_main_items(Tid, Fd, LastLoc) of
                 {ok, Eof} ->
