@@ -1,5 +1,4 @@
 * compaction
-* round-robin writing
 * DELETE support
 * efficient range requests
 * remember Content-Type
