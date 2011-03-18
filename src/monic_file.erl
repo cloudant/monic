@@ -141,8 +141,7 @@ handle_call({write, Ref, {Bin, Next}}, _From, #state{next_index=Index, main_fd=F
                             {ok, IndexPos} = file:position(Fd, cur), %% TODO track this in state.
                             monic_utils:pwrite_term(State#state.index_fd, IndexPos, Index),
                             ets:insert(State#state.tid, Index),
-                            {reply, ok, State#state{next_index=nil, reset_pos=Pos + Size + FooterSize,
-                                write_pos=Pos + Size + FooterSize, writer=nil}};
+                            {reply, ok, finish_write(Pos + Size + FooterSize, State)};
                         Else ->
                             {reply, Else, abandon_write(State)}
                     end;
@@ -278,6 +277,9 @@ load_main_items(Tid, Fd, Location) ->
         Else ->
             Else
     end.
+
+finish_write(Pos, State) ->
+    State#state{next_index=nil, reset_pos=Pos, write_pos=Pos, writer=nil}.
 
 abandon_write(#state{main_fd=Fd, reset_pos=Pos}=State) ->
     truncate(Fd, Pos),
