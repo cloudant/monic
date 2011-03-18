@@ -3,3 +3,4 @@
 * DELETE support
 * efficient range requests
 * remember Content-Type
+* blocking write
