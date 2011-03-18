@@ -27,6 +27,7 @@ ensure_started(App) ->
 %% @doc Starts the app for inclusion in a supervisor tree
 start_link() ->
     ensure_started(crypto),
+    ensure_started(inets),
     ensure_started(mochiweb),
     application:set_env(webmachine, webmachine_logger_module, 
                         webmachine_logger),
@@ -37,6 +38,7 @@ start_link() ->
 %% @doc Start the monic server.
 start() ->
     ensure_started(crypto),
+    ensure_started(inets),
     ensure_started(mochiweb),
     application:set_env(webmachine, webmachine_logger_module, 
                         webmachine_logger),
