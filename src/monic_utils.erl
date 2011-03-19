@@ -61,6 +61,8 @@ pread_term(Fd, Location) ->
     case file:pread(Fd, Location, ?MAX_TERM) of
         {ok, <<Size:16/integer, Bin/binary>>} ->
             {ok, Size + 2, binary_to_term(<<Bin:Size/binary>>)};
+        {ok, _} ->
+            eof;
         Else ->
             Else
     end.
