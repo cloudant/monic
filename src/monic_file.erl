@@ -28,6 +28,7 @@
           index_fd=nil,
           main_fd=nil,
           next_index,
+          pending=queue:new(),
           reset_pos,
           sha,
           write_pos,
@@ -73,7 +74,7 @@ delete(Path) ->
 
 -spec add(pid(), binary(), integer(), integer(), streambody()) -> ok | {error, term()}.
 add(Pid, Key, Cookie, Size, StreamBody) ->
-    case gen_server:call(Pid, {start_writing, Key, Cookie, Size}) of
+    case gen_server:call(Pid, {start_writing, Key, Cookie, Size}, infinity) of
         {ok, Ref} ->
             stream_in(Pid, Ref, StreamBody);
         Else ->
@@ -119,21 +120,11 @@ init(Path) ->
             {stop, Else}
     end.
 
-handle_call({start_writing, Key, Cookie, Size}, _From,
-            #state{main_fd=MainFd, write_pos=Pos, writer=nil}=State) ->
-    Ref = make_ref(),
-    LastModified = erlang:universaltime(),
-    Header = #header{cookie=Cookie, key=Key, size=Size, last_modified=LastModified},
-    Index = #index{cookie=Cookie, key=Key, location=Pos, size=Size, last_modified=LastModified},
-    case monic_utils:pwrite_term(MainFd, Pos, Header) of
-        {ok, HeaderSize} ->
-            {reply, {ok, Ref}, State#state{data_start_pos=Pos + HeaderSize, sha=crypto:sha_init(),
-                                           next_index=Index, write_pos=Pos + HeaderSize, writer=Ref}};
-        Else ->
-            {reply, Else, abandon_write(State)}
-    end;
-handle_call({start_writing, _Key, _Cookie, _Size}, _From, State) ->
-    {reply, {error, already_writing}, State};
+handle_call({start_writing, Key, Cookie, Size}, _From, #state{writer=nil}=State) ->
+    {Reply, State1} = start_write(Key, Cookie, Size, State),
+    {reply, Reply, State1};
+handle_call({start_writing, Key, Cookie, Size}, From, #state{pending=Pending}=State) ->
+    {noreply, State#state{pending=queue:in({Key, Cookie, Size, From}, Pending)}};
 
 handle_call({write, Ref, {Bin, Next}}, _From, #state{next_index=Index, main_fd=Fd, sha=Sha, write_pos=Pos, writer=Ref}=State) ->
     Size = iolist_size(Bin),
@@ -294,12 +285,35 @@ load_main_items(Tid, Fd, Location) ->
             Else
     end.
 
+start_write(Key, Cookie, Size, #state{main_fd=MainFd, write_pos=Pos, writer=nil}=State) ->
+    Ref = make_ref(),
+    LastModified = erlang:universaltime(),
+    Header = #header{cookie=Cookie, key=Key, size=Size, last_modified=LastModified},
+    Index = #index{cookie=Cookie, key=Key, location=Pos, size=Size, last_modified=LastModified},
+    case monic_utils:pwrite_term(MainFd, Pos, Header) of
+        {ok, HeaderSize} ->
+            {{ok, Ref}, State#state{data_start_pos=Pos + HeaderSize, sha=crypto:sha_init(),
+                                    next_index=Index, write_pos=Pos + HeaderSize, writer=Ref}};
+        Else ->
+            {Else, abandon_write(State)}
+    end.
+
 finish_write(Pos, State) ->
-    State#state{next_index=nil, reset_pos=Pos, write_pos=Pos, writer=nil}.
+    maybe_start_pending_write(State#state{next_index=nil, reset_pos=Pos, write_pos=Pos, writer=nil}).
 
 abandon_write(#state{main_fd=Fd, reset_pos=Pos}=State) ->
     truncate(Fd, Pos),
-    State#state{write_pos=Pos, writer=nil}.
+    maybe_start_pending_write(State#state{write_pos=Pos, writer=nil}).
+
+maybe_start_pending_write(#state{pending=Pending}=State) ->
+    case queue:out(Pending) of
+        {empty, Pending1} ->
+            State#state{pending=Pending1};
+        {{value, {Key, Cookie, Size, From}}, Pending1} ->
+            {Reply, State1} = start_write(Key, Cookie, Size, State#state{pending=Pending1}),
+            gen_server:reply(From, Reply),
+            State1
+    end.
 
 truncate(Fd, Pos) ->
     case file:position(Fd, Pos) of
