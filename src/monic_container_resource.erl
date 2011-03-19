@@ -40,7 +40,7 @@ content_types_provided(ReqData, Context) ->
     {[{?CONTAINER_MIME_TYPE, get_container}], ReqData, Context}.
 
 delete_resource(ReqData, Context) ->
-    {file:delete(monic_utils:path(ReqData, Context)) == ok, ReqData, Context}.
+    {monic_file:delete(monic_utils:path(ReqData, Context)) == ok, ReqData, Context}.
 
 is_conflict(ReqData, Context) ->
     {monic_utils:exists(ReqData, Context), ReqData, Context}.
@@ -54,4 +54,4 @@ get_container(ReqData, Context) ->
     {"{\"ok\": true}", ReqData, Context}.
 
 put_container(ReqData, Context) ->
-    {file:write_file(monic_utils:path(ReqData, Context), <<>>, [exclusive]) == ok, ReqData, Context}.
+    {monic_file:create(monic_utils:path(ReqData, Context)), ReqData, Context}.

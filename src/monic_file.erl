@@ -17,7 +17,7 @@
 -include("monic.hrl").
 
 %% public API
--export([open/1, open_new/1, close/1, add/5, delete/3, info/3, read/3]).
+-export([create/1, delete/1, open/1, open_new/1, close/1, add/5, delete/3, info/3, read/3]).
 
 %% gen_server API
 -export([init/1, terminate/2, code_change/3,handle_call/3, handle_cast/2, handle_info/2]).
@@ -54,6 +54,22 @@ open_new(Path) ->
 
 close(Pid) ->
     gen_server:call(Pid, close, infinity).
+
+create(Path) ->
+    file:write_file(Path, <<>>, [exclusive]) == ok.
+
+delete(Path) ->
+    case file:delete(Path ++ ".idx") == ok andalso file:delete(Path) == ok of
+        true ->
+            case open(Path) of
+                {ok, Pid} ->
+                    close(Pid); %% ensure fds are released.
+                Else ->
+                    Else
+            end;
+        Else ->
+            Else
+    end.
 
 -spec add(pid(), binary(), integer(), integer(), streambody()) -> ok | {error, term()}.
 add(Pid, Key, Cookie, Size, StreamBody) ->
