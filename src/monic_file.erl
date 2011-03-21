@@ -292,8 +292,19 @@ load_main_items(Tid, Fd, Location) ->
 start_write(Key, Cookie, Size, #state{main_fd=MainFd,reset_pos=Pos,writer=nil}=State) ->
     Ref = make_ref(),
     LastModified = erlang:universaltime(),
-    Header = #header{cookie=Cookie, key=Key, size=Size, last_modified=LastModified},
-    Index = #index{cookie=Cookie, key=Key, location=Pos, size=Size, last_modified=LastModified},
+    Header = #header{
+      cookie=Cookie,
+      key=Key,
+      size=Size,
+      last_modified=LastModified
+     },
+    Index = #index{
+      cookie=Cookie,
+      key=Key,
+      location=Pos,
+      size=Size,
+      last_modified=LastModified
+     },
     case monic_utils:write_term(MainFd, Header) of
         {ok, HeaderSize} ->
             {{ok, Ref}, State#state{
