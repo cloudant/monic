@@ -14,7 +14,7 @@
 
 -module(monic_utils).
 -export([path/2, exists/2, open/2]).
--export([pwrite_term/3, pread_term/2, header_to_index/2]).
+-export([write_term/2, pread_term/2, header_to_index/2]).
 
 -include("monic.hrl").
 
@@ -40,13 +40,13 @@ open(ReqData, Context) ->
 exists(ReqData, Context) ->
     filelib:is_file(path(ReqData, Context)).
 
--spec pwrite_term(term(), integer(), term()) -> {ok, integer()} | {error, term()}.
-pwrite_term(Fd, Location, Term) ->
+-spec write_term(term(), term()) -> {ok, integer()} | {error, term()}.
+write_term(Fd, Term) ->
     Bin = term_to_binary(Term),
     Size = iolist_size(Bin),
     case Size =< ?MAX_TERM of
         true ->
-            case file:pwrite(Fd, Location, <<Size:16/integer, Bin/binary>>) of
+            case file:write(Fd, <<Size:16/integer, Bin/binary>>) of
                 ok ->
                     {ok, Size + 2};
                 Else ->
@@ -56,7 +56,7 @@ pwrite_term(Fd, Location, Term) ->
             {error, term_too_long}
     end.
 
--spec pread_term(term(), integer()) -> {ok, integer(), binary()} | eof | {error, term()}.
+-spec pread_term(term(), integer()) -> {ok, integer(), term()} | eof | {error, term()}.
 pread_term(Fd, Location) ->
     case file:pread(Fd, Location, ?MAX_TERM) of
         {ok, <<Size:16/integer, Bin/binary>>} ->

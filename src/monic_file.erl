@@ -23,19 +23,19 @@
 -export([init/1, terminate/2, code_change/3,handle_call/3, handle_cast/2, handle_info/2]).
 
 -record(state, {
-          data_start_pos,
           tid,
+          header_size,
           index_fd=nil,
           main_fd=nil,
           next_index,
           pending=queue:new(),
+          remaining,
           reset_pos,
           sha,
-          write_pos,
           writer=nil
          }).
 
--type streambody() :: fun(({binary(), fun() | done}) -> streambody()).
+-type streambody() :: {binary(), done | fun(() -> streambody())}.
 
 %% public functions
 
@@ -81,7 +81,7 @@ add(Pid, Key, Cookie, Size, StreamBody) ->
             Else
     end.
 
--spec delete(pid(), binary(), integer()) -> boolean().
+-spec delete(pid(), binary(), integer()) -> ok | {error, term()}.
 delete(Pid, Key, Cookie) ->
     gen_server:call(Pid, {delete, Key, Cookie}, infinity).
 
@@ -89,7 +89,7 @@ delete(Pid, Key, Cookie) ->
 info(Pid, Key, Cookie) ->
     gen_server:call(Pid, {info, Key, Cookie}).
 
--spec read(pid(), binary(), integer()) -> ok | {error, term()}.
+-spec read(pid(), binary(), integer()) -> {ok, streambody()} | {error, term()}.
 read(Pid, Key, Cookie) ->
     case gen_server:call(Pid, {read, Key, Cookie}) of
         {ok, StreamBodyFun} ->
@@ -110,7 +110,6 @@ init(Path) ->
                        index_fd=IndexFd,
                        main_fd=MainFd,
                        reset_pos=Eof,
-                       write_pos=Eof,
                        tid=Tid
                       }};
                 Else ->
@@ -126,29 +125,28 @@ handle_call({start_writing, Key, Cookie, Size}, _From, #state{writer=nil}=State)
 handle_call({start_writing, Key, Cookie, Size}, From, #state{pending=Pending}=State) ->
     {noreply, State#state{pending=queue:in({Key, Cookie, Size, From}, Pending)}};
 
-handle_call({write, Ref, {Bin, Next}}, _From, #state{next_index=Index, main_fd=Fd, sha=Sha, write_pos=Pos, writer=Ref}=State) ->
+handle_call({write, Ref, {Bin, Next}}, _From, #state{header_size=HeaderSize, main_fd=Fd, next_index=Index,
+                                                     remaining=Remaining, reset_pos=Pos, sha=Sha, writer=Ref}=State) ->
     Size = iolist_size(Bin),
-    Remaining = Index#index.size - (Pos + Size - State#state.data_start_pos),
-    Write = case {Next, Remaining} of
-                {_, Remaining} when Remaining < 0 ->
+    Write = case {Next, Remaining - Size} of
+                {_, Remaining1} when Remaining1 < 0 ->
                     {error, overflow};
-                {done, Remaining} when Remaining > 0 ->
+                {done, Remaining1} when Remaining1 > 0 ->
                     {error, underflow};
                 _ ->
-                    file:pwrite(Fd, Pos, Bin)
+                    file:write(Fd, Bin)
             end,
     Sha1 = crypto:sha_update(Sha, Bin),
     case {Next, Write} of
         {done, ok} ->
             Footer = #footer{sha=crypto:sha_final(Sha1)},
-            case monic_utils:pwrite_term(Fd, Pos + Size, Footer) of
+            case monic_utils:write_term(Fd, Footer) of
                 {ok, FooterSize} ->
                     case file:datasync(Fd) of
                         ok ->
-                            {ok, IndexPos} = file:position(Fd, cur), %% TODO track this in state.
-                            monic_utils:pwrite_term(State#state.index_fd, IndexPos, Index),
+                            monic_utils:write_term(State#state.index_fd, Index),
                             ets:insert(State#state.tid, Index),
-                            {reply, ok, finish_write(Pos + Size + FooterSize, State)};
+                            {reply, ok, finish_write(Pos + HeaderSize + Size + FooterSize, State)};
                         Else ->
                             {reply, Else, abandon_write(State)}
                     end;
@@ -156,7 +154,7 @@ handle_call({write, Ref, {Bin, Next}}, _From, #state{next_index=Index, main_fd=F
                     {reply, Else, abandon_write(State)}
             end;
         {_, ok} ->
-            {reply, {continue, Next}, State#state{sha=Sha1, write_pos=Pos + Size}};
+            {reply, {continue, Next}, State#state{remaining=Remaining-Size, sha=Sha1}};
         {_, Else} ->
             {reply, Else, abandon_write(State)}
     end;
@@ -175,19 +173,16 @@ handle_call({read, Key, Cookie}, _From, #state{main_fd=Fd, tid=Tid}=State) ->
 handle_call({read_hunk, Location, Size}, _From, #state{main_fd=Fd}=State) ->
     {reply, file:pread(Fd, Location, Size), State};
 
-handle_call({delete, Key, Cookie}, _From, #state{tid=Tid,main_fd=MainFd,index_fd=IndexFd,write_pos=Pos}=State) ->
+handle_call({delete, Key, Cookie}, _From, #state{index_fd=IndexFd,main_fd=MainFd,reset_pos=Pos,tid=Tid}=State) ->
     case info_int(Tid, Key, Cookie) of
         {ok, _} ->
-            case monic_utils:pwrite_term(MainFd, Pos, #header{key=Key,cookie=Cookie,deleted=true}) of
+            case monic_utils:write_term(MainFd, #header{key=Key,deleted=true}) of
                 {ok, HeaderSize} ->
                     case file:datasync(MainFd) of
                         ok ->
-                            {ok, IndexPos} = file:position(IndexFd, cur), %% TODO track this in state.
-                            monic_utils:pwrite_term(IndexFd, IndexPos, #index{location=Pos,key=Key,
-                                cookie=Cookie,deleted=true}),
-                            {reply, ets:delete(Tid, Key), State#state{
-                                reset_pos=Pos+HeaderSize,
-                                write_pos=Pos+HeaderSize}};
+                            monic_utils:write_term(IndexFd, #index{key=Key,cookie=Cookie,deleted=true}),
+                            true = ets:delete(Tid, Key),
+                            {reply, ok, State#state{reset_pos=Pos+HeaderSize}};
                         Else ->
                             {reply, Else, abandon_write(State)}
                     end;
@@ -266,7 +261,7 @@ load_main_items(Tid, Fd, Location) ->
         {ok, HeaderSize, #header{deleted=Deleted,key=Key,size=Size}=Header} ->
             case Deleted of
                 false ->
-                    ets:insert(Tid, monic_utils:header_to_index(Header)),
+                    ets:insert(Tid, monic_utils:header_to_index(Header, Location)),
                     case monic_utils:pread_term(Fd, Location + HeaderSize + Size) of
                         {ok, FooterSize, _} ->
                             load_main_items(Tid, Fd, Location + HeaderSize + Size + FooterSize);
@@ -285,25 +280,25 @@ load_main_items(Tid, Fd, Location) ->
             Else
     end.
 
-start_write(Key, Cookie, Size, #state{main_fd=MainFd, write_pos=Pos, writer=nil}=State) ->
+start_write(Key, Cookie, Size, #state{main_fd=MainFd,reset_pos=Pos,writer=nil}=State) ->
     Ref = make_ref(),
     LastModified = erlang:universaltime(),
     Header = #header{cookie=Cookie, key=Key, size=Size, last_modified=LastModified},
     Index = #index{cookie=Cookie, key=Key, location=Pos, size=Size, last_modified=LastModified},
-    case monic_utils:pwrite_term(MainFd, Pos, Header) of
+    case monic_utils:write_term(MainFd, Header) of
         {ok, HeaderSize} ->
-            {{ok, Ref}, State#state{data_start_pos=Pos + HeaderSize, sha=crypto:sha_init(),
-                                    next_index=Index, write_pos=Pos + HeaderSize, writer=Ref}};
+            {{ok, Ref}, State#state{header_size=HeaderSize, remaining=Size, sha=crypto:sha_init(),
+                                    next_index=Index, writer=Ref}};
         Else ->
             {Else, abandon_write(State)}
     end.
 
-finish_write(Pos, State) ->
-    maybe_start_pending_write(State#state{next_index=nil, reset_pos=Pos, write_pos=Pos, writer=nil}).
+finish_write(Eof, State) ->
+    maybe_start_pending_write(State#state{next_index=nil, reset_pos=Eof, writer=nil}).
 
 abandon_write(#state{main_fd=Fd, reset_pos=Pos}=State) ->
     truncate(Fd, Pos),
-    maybe_start_pending_write(State#state{write_pos=Pos, writer=nil}).
+    maybe_start_pending_write(State#state{writer=nil}).
 
 maybe_start_pending_write(#state{pending=Pending}=State) ->
     case queue:out(Pending) of
