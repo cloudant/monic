@@ -30,6 +30,7 @@ all_test_() ->
       fun add_single_hunk/1,
       fun add_multi_hunk/1,
       fun add_multi_items/1,
+      fun large_item/1,
       fun overflow/1,
       fun underflow/1,
       fun update_item/1,
@@ -57,6 +58,16 @@ add_multi_items(Pid) ->
      ?_assertMatch(ok, monic_file:add(Pid, <<"baz">>, ?COOKIE, 3, {<<"789">>, done})),
      ?_assertMatch(ok, monic_file:add(Pid, <<"foobar">>, ?COOKIE, 3, {<<"abc">>, done}))].
 
+large_item(Pid) ->
+    {"add a large item in one hunk",
+     fun() ->
+             Bin = crypto:rand_bytes(128*1024),
+             StreamBody = {Bin, done},
+             ?assertMatch(ok, monic_file:add(Pid, <<"foo">>, ?COOKIE, iolist_size(Bin), StreamBody)),
+             {ok, StreamBody1} = monic_file:read(Pid, <<"foo">>, ?COOKIE),
+             ?assertMatch(Bin, streambody_to_binary(StreamBody1))
+     end}.
+
 overflow(Pid) ->
     Res = monic_file:add(Pid, <<"foo">>, ?COOKIE, 3, {<<"1234">>, done}),
     ?_assertEqual({error, overflow}, Res).
@@ -82,3 +93,14 @@ delete_item(Pid) ->
              ?assertMatch(ok, monic_file:delete(Pid, <<"foo">>, ?COOKIE)),
              ?assertMatch({error, not_found}, monic_file:read(Pid, <<"foo">>,  ?COOKIE))
      end}.
+
+streambody_to_binary(StreamBody) ->
+    iolist_to_binary(streambody_to_iolist(StreamBody)).
+
+streambody_to_iolist(StreamBody) ->
+    lists:reverse(streambody_to_iolist(StreamBody, [])).
+
+streambody_to_iolist({Bin, done}, Acc) ->
+    [Bin|Acc];
+streambody_to_iolist({Bin, Next}, Acc) ->
+    streambody_to_iolist(Next(), [Bin|Acc]).
