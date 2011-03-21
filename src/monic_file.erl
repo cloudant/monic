@@ -103,7 +103,7 @@ read(Pid, Key, Cookie) ->
 %% gen_server functions
 
 init(Path) ->
-    Tid = ets:new(index, [{keypos, 2}, set, private]),
+    Tid = ets:new(index, [{keypos, #index.key}, set, private]),
     case load_index(Tid, Path) of
         {ok, IndexFd, LastLoc} ->
             case load_main(Tid, Path, LastLoc) of
