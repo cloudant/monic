@@ -31,7 +31,9 @@ all_test_() ->
       fun add_multi_hunk/1,
       fun add_multi_items/1,
       fun overflow/1,
-      fun underflow/1
+      fun underflow/1,
+      fun update_item/1,
+      fun delete_item/1
      ]}.
 
 add_single_hunk(Pid) ->
@@ -62,3 +64,21 @@ overflow(Pid) ->
 underflow(Pid) ->
     Res = monic_file:add(Pid, <<"foo">>, ?COOKIE, 3, {<<"12">>, done}),
     ?_assertEqual({error, underflow}, Res).
+
+update_item(Pid) ->
+    {"update an item",
+     fun() ->
+             ?assertMatch(ok, monic_file:add(Pid, <<"foo">>, ?COOKIE, 3, {<<"123">>, done})),
+             ?assertMatch({ok, {<<"123">>, done}}, monic_file:read(Pid, <<"foo">>,  ?COOKIE)),
+             ?assertMatch(ok, monic_file:add(Pid, <<"foo">>, ?COOKIE, 3, {<<"456">>, done})),
+             ?assertMatch({ok, {<<"456">>, done}}, monic_file:read(Pid, <<"foo">>,  ?COOKIE))
+     end}.
+
+delete_item(Pid) ->
+    {"delete an item",
+     fun() ->
+             ?assertMatch(ok, monic_file:add(Pid, <<"foo">>, ?COOKIE, 3, {<<"123">>, done})),
+             ?assertMatch({ok, _}, monic_file:read(Pid, <<"foo">>,  ?COOKIE)),
+             ?assertMatch(ok, monic_file:delete(Pid, <<"foo">>, ?COOKIE)),
+             ?assertMatch({error, not_found}, monic_file:read(Pid, <<"foo">>,  ?COOKIE))
+     end}.
