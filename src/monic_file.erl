@@ -26,6 +26,7 @@
           tid,
           header_size,
           index_fd=nil,
+          last_write=nil,
           main_fd=nil,
           next_index,
           pending=queue:new(),
@@ -35,6 +36,7 @@
           writer=nil
          }).
 
+-define(IDLE_WRITER_TIMEOUT, 5000).
 -type streambody() :: {binary(), done | fun(() -> streambody())}.
 
 %% public functions
@@ -122,8 +124,15 @@ init(Path) ->
 handle_call({start_writing, Key, Cookie, Size}, _From, #state{writer=nil}=State) ->
     {Reply, State1} = start_write(Key, Cookie, Size, State),
     {reply, Reply, State1};
-handle_call({start_writing, Key, Cookie, Size}, From, #state{pending=Pending}=State) ->
-    {noreply, State#state{pending=queue:in({Key, Cookie, Size, From}, Pending)}};
+handle_call({start_writing, Key, Cookie, Size}, From, #state{last_write=LastWrite, pending=Pending}=State) ->
+    State1 = State#state{pending=queue:in({Key, Cookie, Size, From}, Pending)},
+    case timer:now_diff(now(), LastWrite) > ?IDLE_WRITER_TIMEOUT of
+        true ->
+            erlang:display(recovering_from_writer_timeout),
+            {noreply, abandon_write(State1)};
+        false ->
+            {noreply, State1}
+    end;
 
 handle_call({write, Ref, {Bin, Next}}, _From, #state{header_size=HeaderSize, main_fd=Fd, next_index=Index,
                                                      remaining=Remaining, reset_pos=Pos, sha=Sha, writer=Ref}=State) ->
@@ -154,7 +163,7 @@ handle_call({write, Ref, {Bin, Next}}, _From, #state{header_size=HeaderSize, mai
                     {reply, Else, abandon_write(State)}
             end;
         {_, ok} ->
-            {reply, {continue, Next}, State#state{remaining=Remaining-Size, sha=Sha1}};
+            {reply, {continue, Next}, State#state{last_write=now(), remaining=Remaining-Size, sha=Sha1}};
         {_, Else} ->
             {reply, Else, abandon_write(State)}
     end;
@@ -287,14 +296,19 @@ start_write(Key, Cookie, Size, #state{main_fd=MainFd,reset_pos=Pos,writer=nil}=S
     Index = #index{cookie=Cookie, key=Key, location=Pos, size=Size, last_modified=LastModified},
     case monic_utils:write_term(MainFd, Header) of
         {ok, HeaderSize} ->
-            {{ok, Ref}, State#state{header_size=HeaderSize, remaining=Size, sha=crypto:sha_init(),
-                                    next_index=Index, writer=Ref}};
+            {{ok, Ref}, State#state{
+                          last_write=now(),
+                          header_size=HeaderSize,
+                          remaining=Size,
+                          sha=crypto:sha_init(),
+                          next_index=Index,
+                          writer=Ref}};
         Else ->
             {Else, abandon_write(State)}
     end.
 
 finish_write(Eof, State) ->
-    maybe_start_pending_write(State#state{next_index=nil, reset_pos=Eof, writer=nil}).
+    maybe_start_pending_write(State#state{last_write=nil, next_index=nil, reset_pos=Eof, writer=nil}).
 
 abandon_write(#state{main_fd=Fd, reset_pos=Pos}=State) ->
     truncate(Fd, Pos),
