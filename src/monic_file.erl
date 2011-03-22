@@ -24,7 +24,6 @@
 
 -record(state, {
           tid,
-          header_size,
           index_fd=nil,
           last_write=nil,
           main_fd=nil,
@@ -33,6 +32,7 @@
           remaining,
           reset_pos,
           sha,
+          written,
           writer=nil
          }).
 
@@ -133,8 +133,9 @@ handle_call({start_writing, Key, Cookie, Size}, From, #state{last_write=LastWrit
             {noreply, State1}
     end;
 
-handle_call({write, Ref, {Bin, Next}}, _From, #state{header_size=HeaderSize, main_fd=Fd, next_header=Header,
-                                                     remaining=Remaining, reset_pos=Pos, sha=Sha, writer=Ref}=State) ->
+handle_call({write, Ref, {Bin, Next}}, _From, #state{main_fd=Fd, next_header=Header,
+                                                     remaining=Remaining, written=Written,
+                                                     reset_pos=Pos, sha=Sha, writer=Ref}=State) ->
     Size = iolist_size(Bin),
     Write = case {Next, Remaining - Size} of
                 {_, Remaining1} when Remaining1 < 0 ->
@@ -154,7 +155,7 @@ handle_call({write, Ref, {Bin, Next}}, _From, #state{header_size=HeaderSize, mai
                         ok ->
                             monic_utils:write_term(State#state.index_fd, Header),
                             ets:insert(State#state.tid, Header),
-                            {reply, ok, finish_write(Pos + HeaderSize + Size + FooterSize, State)};
+                            {reply, ok, finish_write(Pos + Written + Size + FooterSize, State)};
                         Else ->
                             {reply, Else, abandon_write(State)}
                     end;
@@ -162,7 +163,8 @@ handle_call({write, Ref, {Bin, Next}}, _From, #state{header_size=HeaderSize, mai
                     {reply, Else, abandon_write(State)}
             end;
         {_, ok} ->
-            {reply, {continue, Next}, State#state{last_write=now(), remaining=Remaining-Size, sha=Sha1}};
+            {reply, {continue, Next}, State#state{last_write=now(), remaining=Remaining-Size,
+                                                  written=Written+Size, sha=Sha1}};
         {_, Else} ->
             {reply, Else, abandon_write(State)}
     end;
@@ -302,11 +304,11 @@ start_write(Key, Cookie, Size, #state{main_fd=MainFd,reset_pos=Pos,writer=nil}=S
         {ok, HeaderSize} ->
             {{ok, Ref}, State#state{
                           last_write=now(),
-                          header_size=HeaderSize,
                           remaining=Size,
                           sha=crypto:sha_init(),
                           next_header=Header,
-                          writer=Ref}};
+                          writer=Ref,
+                          written=HeaderSize}};
         Else ->
             {Else, abandon_write(State)}
     end.
