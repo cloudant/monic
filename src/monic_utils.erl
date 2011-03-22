@@ -14,7 +14,7 @@
 
 -module(monic_utils).
 -export([path/2, exists/2, open/2]).
--export([write_term/2, pread_term/2, header_to_index/2]).
+-export([write_term/2, pread_term/2]).
 
 -include("monic.hrl").
 
@@ -66,8 +66,3 @@ pread_term(Fd, Location) ->
         Else ->
             Else
     end.
-
--spec header_to_index(#header{}, integer()) -> #index{}.
-header_to_index(#header{key=Key,cookie=Cookie,size=Size,last_modified=LastModified, deleted=Deleted}, Location) ->
-    #index{key=Key,cookie=Cookie,size=Size,last_modified=LastModified,deleted=Deleted,location=Location}.
-

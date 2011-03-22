@@ -28,7 +28,7 @@
           index_fd=nil,
           last_write=nil,
           main_fd=nil,
-          next_index,
+          next_header,
           pending=queue:new(),
           remaining,
           reset_pos,
@@ -103,7 +103,7 @@ read(Pid, Key, Cookie) ->
 %% gen_server functions
 
 init(Path) ->
-    Tid = ets:new(index, [{keypos, #index.key}, set, private]),
+    Tid = ets:new(index, [{keypos, #header.key}, set, private]),
     case load_index(Tid, Path) of
         {ok, IndexFd, LastLoc} ->
             case load_main(Tid, Path, LastLoc) of
@@ -128,13 +128,12 @@ handle_call({start_writing, Key, Cookie, Size}, From, #state{last_write=LastWrit
     State1 = State#state{pending=queue:in({Key, Cookie, Size, From}, Pending)},
     case timer:now_diff(now(), LastWrite) > ?IDLE_WRITER_TIMEOUT of
         true ->
-            erlang:display(recovering_from_writer_timeout),
             {noreply, abandon_write(State1)};
         false ->
             {noreply, State1}
     end;
 
-handle_call({write, Ref, {Bin, Next}}, _From, #state{header_size=HeaderSize, main_fd=Fd, next_index=Index,
+handle_call({write, Ref, {Bin, Next}}, _From, #state{header_size=HeaderSize, main_fd=Fd, next_header=Header,
                                                      remaining=Remaining, reset_pos=Pos, sha=Sha, writer=Ref}=State) ->
     Size = iolist_size(Bin),
     Write = case {Next, Remaining - Size} of
@@ -153,8 +152,8 @@ handle_call({write, Ref, {Bin, Next}}, _From, #state{header_size=HeaderSize, mai
                 {ok, FooterSize} ->
                     case file:datasync(Fd) of
                         ok ->
-                            monic_utils:write_term(State#state.index_fd, Index),
-                            ets:insert(State#state.tid, Index),
+                            monic_utils:write_term(State#state.index_fd, Header),
+                            ets:insert(State#state.tid, Header),
                             {reply, ok, finish_write(Pos + HeaderSize + Size + FooterSize, State)};
                         Else ->
                             {reply, Else, abandon_write(State)}
@@ -189,7 +188,7 @@ handle_call({delete, Key, Cookie}, _From, #state{index_fd=IndexFd,main_fd=MainFd
                 {ok, HeaderSize} ->
                     case file:datasync(MainFd) of
                         ok ->
-                            monic_utils:write_term(IndexFd, #index{key=Key,cookie=Cookie,deleted=true}),
+                            monic_utils:write_term(IndexFd, #header{key=Key,cookie=Cookie,deleted=true}),
                             true = ets:delete(Tid, Key),
                             {reply, ok, State#state{reset_pos=Pos+HeaderSize}};
                         Else ->
@@ -240,9 +239,9 @@ load_index_items(Tid, Fd) ->
 
 load_index_items(Tid, Fd, IndexLocation, Eof) ->
     case monic_utils:pread_term(Fd, IndexLocation) of
-        {ok, IndexSize, #index{deleted=Deleted,key=Key,location=Location}=Index} ->
+        {ok, IndexSize, #header{deleted=Deleted,key=Key,location=Location}=Header} ->
             case Deleted of
-                false -> ets:insert(Tid, Index);
+                false -> ets:insert(Tid, Header);
                 true -> ets:delete(Tid, Key)
             end,
             load_index_items(Tid, Fd, IndexLocation + IndexSize, Location);
@@ -270,7 +269,7 @@ load_main_items(Tid, Fd, Location) ->
         {ok, HeaderSize, #header{deleted=Deleted,key=Key,size=Size}=Header} ->
             case Deleted of
                 false ->
-                    ets:insert(Tid, monic_utils:header_to_index(Header, Location)),
+                    ets:insert(Tid, Header#header{location=Location}),
                     case monic_utils:pread_term(Fd, Location + HeaderSize + Size) of
                         {ok, FooterSize, _} ->
                             load_main_items(Tid, Fd, Location + HeaderSize + Size + FooterSize);
@@ -295,31 +294,25 @@ start_write(Key, Cookie, Size, #state{main_fd=MainFd,reset_pos=Pos,writer=nil}=S
     Header = #header{
       cookie=Cookie,
       key=Key,
-      size=Size,
-      last_modified=LastModified
-     },
-    Index = #index{
-      cookie=Cookie,
-      key=Key,
       location=Pos,
       size=Size,
       last_modified=LastModified
      },
-    case monic_utils:write_term(MainFd, Header) of
+    case monic_utils:write_term(MainFd, Header#header{location=nil}) of
         {ok, HeaderSize} ->
             {{ok, Ref}, State#state{
                           last_write=now(),
                           header_size=HeaderSize,
                           remaining=Size,
                           sha=crypto:sha_init(),
-                          next_index=Index,
+                          next_header=Header,
                           writer=Ref}};
         Else ->
             {Else, abandon_write(State)}
     end.
 
 finish_write(Eof, State) ->
-    maybe_start_pending_write(State#state{last_write=nil, next_index=nil, reset_pos=Eof, writer=nil}).
+    maybe_start_pending_write(State#state{last_write=nil, next_header=nil, reset_pos=Eof, writer=nil}).
 
 abandon_write(#state{main_fd=Fd, reset_pos=Pos}=State) ->
     truncate(Fd, Pos),
@@ -370,7 +363,7 @@ stream_out(Pid, Location, Remaining) ->
 
 info_int(Tid, Key, Cookie) ->
     case ets:lookup(Tid, Key) of
-        [#index{cookie=Cookie,location=Location,size=Size,last_modified=LastModified}] ->
+        [#header{cookie=Cookie,location=Location,size=Size,last_modified=LastModified}] ->
             {ok, {Location, Size, LastModified}};
         _ ->
             {error, not_found}
