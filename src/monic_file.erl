@@ -17,7 +17,8 @@
 -include("monic.hrl").
 
 %% public API
--export([create/1, delete/1, open/1, open_new/1, close/1, add/5, delete/3, info/3, read/3]).
+-export([create/1, delete/1, open/1, open_new/1, close/1, compact/1]).
+-export([add/5, delete/3, info/3, read/3]).
 
 %% gen_server API
 -export([init/1, terminate/2, code_change/3,handle_call/3, handle_cast/2, handle_info/2]).
@@ -57,6 +58,9 @@ open_new(Path) ->
 
 close(Pid) ->
     gen_server:call(Pid, close, infinity).
+
+compact(Pid) ->
+    gen_server:call(Pid, compact, infinity).
 
 create(Path) ->
     file:write_file(Path, <<>>, [exclusive]) == ok.
@@ -207,7 +211,10 @@ handle_call({info, Key, Cookie}, _From, #state{tid=Tid}=State) ->
     {reply, info_int(Tid, Key, Cookie), State};
 
 handle_call(close, _From, State) ->
-    {stop, normal, ok, cleanup(State)}.
+    {stop, normal, ok, cleanup(State)};
+
+handle_call(compact, _From, State) ->
+    {reply, ok, State}.
 
 handle_cast(_Msg, State) ->
     {noreply, State}.

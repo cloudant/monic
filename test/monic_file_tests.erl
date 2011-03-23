@@ -15,7 +15,7 @@
 -module(monic_file_tests).
 -include("monic.hrl").
 -include_lib("eunit/include/eunit.hrl").
-
+-include_lib("kernel/include/file.hrl").
 -define(COOKIE, 1).
 
 all_test_() ->
@@ -34,7 +34,8 @@ all_test_() ->
       fun overflow/1,
       fun underflow/1,
       fun update_item/1,
-      fun delete_item/1
+      fun delete_item/1,
+      fun compaction/1
      ]}.
 
 add_single_hunk(Pid) ->
@@ -93,6 +94,19 @@ delete_item(Pid) ->
              ?assertMatch(ok, monic_file:delete(Pid, <<"foo">>, ?COOKIE)),
              ?assertMatch({error, not_found}, monic_file:read(Pid, <<"foo">>,  ?COOKIE))
      end}.
+
+compaction(Pid) ->
+    {"compaction",
+     fun() ->
+             ok = monic_file:add(Pid, <<"foo">>, ?COOKIE, 3, {<<"123">>, done}),
+             ok = monic_file:add(Pid, <<"bar">>, ?COOKIE, 3, {<<"456">>, done}),
+             ok = monic_file:delete(Pid, <<"foo">>, ?COOKIE),
+             {ok, #file_info{size=BeforeSize}} = file:read_file_info("foo.monic"),
+             ok = monic_file:compact(Pid),
+             {ok, #file_info{size=AfterSize}} = file:read_file_info("foo.monic"),
+             ?assert(AfterSize < BeforeSize)
+     end}.
+
 
 streambody_to_binary(StreamBody) ->
     iolist_to_binary(streambody_to_iolist(StreamBody)).
