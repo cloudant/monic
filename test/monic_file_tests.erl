@@ -23,6 +23,7 @@ all_test_() ->
      fun() ->
              file:delete("foo.monic"),
              file:delete("foo.monic.idx"),
+             file:delete("foo.monic.compact"),
              {ok, Pid} = monic_file:open("foo.monic"),
              Pid end,
      fun(Pid) -> monic_file:close(Pid) end,
@@ -104,7 +105,8 @@ compaction(Pid) ->
              {ok, #file_info{size=BeforeSize}} = file:read_file_info("foo.monic"),
              ok = monic_file:compact(Pid),
              {ok, #file_info{size=AfterSize}} = file:read_file_info("foo.monic"),
-             ?assert(AfterSize < BeforeSize)
+             ?assert(AfterSize < BeforeSize),
+             ?assertMatch({ok, {<<"456">>, done}}, monic_file:read(Pid, <<"bar">>,  ?COOKIE))
      end}.
 
 

@@ -276,20 +276,17 @@ load_main(Tid, Path, Eof) ->
 
 load_main_items(Tid, Fd, Location) ->
     case monic_utils:pread_term(Fd, Location) of
-        {ok, HeaderSize, #header{deleted=Deleted,key=Key,size=Size}=Header} ->
-            case Deleted of
-                false ->
-                    ets:insert(Tid, Header#header{location=Location}),
-                    case monic_utils:pread_term(Fd, Location + HeaderSize + Size) of
-                        {ok, FooterSize, _} ->
-                            load_main_items(Tid, Fd, Location + HeaderSize + Size + FooterSize);
-                        eof ->
-                            truncate(Fd, Location),
-                            {ok, Location}
-                    end;
-                true ->
-                    ets:delete(Tid, Key),
-                    load_main_items(Tid, Fd, Location + HeaderSize)
+        {ok, HeaderSize, #header{deleted=true,key=Key}} ->
+            ets:delete(Tid, Key),
+            load_main_items(Tid, Fd, Location + HeaderSize);
+        {ok, HeaderSize, #header{deleted=false,size=Size}=Header} ->
+            ets:insert(Tid, Header#header{location=Location}),
+            case monic_utils:pread_term(Fd, Location + HeaderSize + Size) of
+                {ok, FooterSize, _} ->
+                    load_main_items(Tid, Fd, Location + HeaderSize + Size + FooterSize);
+                eof ->
+                    truncate(Fd, Location),
+                    {ok, Location}
             end;
         eof ->
             truncate(Fd, Location),
@@ -415,7 +412,77 @@ init_int(Path) ->
             Else
     end.
 
+%% TODO write Path ++ ".compact.idx" as well!
+compact_int(#state{index_fd=IndexFd, main_fd=MainFd, path=Path, tid=Tid}) ->
+    case file:open(Path ++ ".compact", [binary, raw, append]) of
+        {ok, CompactFd} ->
+            case compact_int(IndexFd, MainFd, CompactFd, Tid, 0) of
+                ok ->
+                    case file:datasync(CompactFd) of
+                        ok ->
+                            file:delete(Path ++ ".idx"), %% TODO file:rename(Path ++ ".compact.idx", Path ++ ".idx")
+                            file:rename(Path ++ ".compact", Path);
+                        Else ->
+                            Else
+                    end;
+                Else ->
+                    Else
+            end;
+        Else ->
+            Else
+    end.
 
-compact_int(_State) ->
-    ok.
+%% TODO this method assumes all entries are in the index file which is not currently true.
+%% fix load_main_items to write missing entries to index_fd as it finds items.
+compact_int(IndexFd, MainFd, CompactFd, Tid, IndexLocation) ->
+    case monic_utils:pread_term(IndexFd, IndexLocation) of
+        {ok, IndexHeaderSize, #header{key=Key,location=OldLocation,size=Size}=Header} ->
+            case ets:lookup(Tid, Key) of
+                [_] ->
+                    case monic_utils:write_term(CompactFd, Header#header{location=nil}) of
+                        {ok, CompactHeaderSize} ->
+                            case copy_item(MainFd, CompactFd, OldLocation + CompactHeaderSize, Size) of
+                                ok ->
+                                    case monic_utils:pread_term(MainFd, OldLocation + CompactHeaderSize + Size) of
+                                        {ok, _, #footer{}=Footer} ->
+                                            case monic_utils:write_term(CompactFd, Footer) of
+                                                {ok, _} ->
+                                                    compact_int(IndexFd, MainFd, CompactFd, Tid,
+                                                                IndexLocation + IndexHeaderSize);
+                                                Else ->
+                                                    Else
+                                            end;
+                                        Else ->
+                                            Else
+                                    end;
+                                Else ->
+                                    Else
+                            end;
+                        Else ->
+                            Else
+                    end;
+                [] ->
+                    compact_int(IndexFd, MainFd, CompactFd, Tid, IndexLocation + IndexHeaderSize)
+            end;
+        eof ->
+            ok;
+        Else ->
+            Else
+    end.
+
+copy_item(_FromFd, _ToFd, _Location, 0) ->
+    ok;
+copy_item(FromFd, ToFd, Location, Remaining) when Remaining > 0 ->
+    case file:pread(FromFd, Location, min(Remaining, ?BUFFER_SIZE)) of
+        {ok, Bin} ->
+            Size = iolist_size(Bin),
+            case file:write(ToFd, Bin) of
+                ok ->
+                    copy_item(FromFd, ToFd, Location + Size, Remaining - Size);
+                Else ->
+                    Else
+            end;
+        Else ->
+            Else
+    end.
 

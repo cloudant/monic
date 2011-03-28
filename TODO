@@ -1,5 +1,4 @@
 * compaction
-* DELETE support
 * efficient range requests
 * remember Content-Type
-* blocking write
+* add missing index entries during load_main_items
