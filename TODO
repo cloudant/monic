@@ -1,4 +1,8 @@
 * compaction
 * efficient range requests
 * remember Content-Type
+
+
 * add missing index entries during load_main_items
+* build new index during compaction
+* solid rename strategy for flip (lucene way?)
