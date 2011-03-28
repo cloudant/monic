@@ -29,6 +29,7 @@
           last_write=nil,
           main_fd=nil,
           next_header,
+          path,
           pending=queue:new(),
           remaining,
           reset_pos,
@@ -107,20 +108,9 @@ read(Pid, Key, Cookie) ->
 %% gen_server functions
 
 init(Path) ->
-    Tid = ets:new(index, [{keypos, #header.key}, set, private]),
-    case load_index(Tid, Path) of
-        {ok, IndexFd, LastLoc} ->
-            case load_main(Tid, Path, LastLoc) of
-                {ok, MainFd, Eof} ->
-                    {ok, #state{
-                       index_fd=IndexFd,
-                       main_fd=MainFd,
-                       reset_pos=Eof,
-                       tid=Tid
-                      }};
-                Else ->
-                    {stop, Else}
-            end;
+    case init_int(Path) of
+        {ok, State} ->
+            {ok, State};
         Else ->
             {stop, Else}
     end.
@@ -213,8 +203,19 @@ handle_call({info, Key, Cookie}, _From, #state{tid=Tid}=State) ->
 handle_call(close, _From, State) ->
     {stop, normal, ok, cleanup(State)};
 
-handle_call(compact, _From, State) ->
-    {reply, ok, State}.
+handle_call(compact, _From, #state{path=Path}=State) ->
+    case compact_int(State) of
+        ok ->
+            case init_int(Path) of
+                {ok, State1} ->
+                    cleanup(State),
+                    {reply, ok, State1};
+                Else ->
+                    {reply, Else, State}
+            end;
+        Else ->
+            {reply, Else, State}
+    end.
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -248,11 +249,11 @@ load_index_items(Tid, Fd) ->
 
 load_index_items(Tid, Fd, IndexLocation, Eof) ->
     case monic_utils:pread_term(Fd, IndexLocation) of
-        {ok, IndexSize, #header{deleted=Deleted,key=Key,location=Location}=Header} ->
-            case Deleted of
-                false -> ets:insert(Tid, Header);
-                true -> ets:delete(Tid, Key)
-            end,
+        {ok, IndexSize, #header{deleted=true,key=Key}} ->
+            ets:delete(Tid, Key),
+            load_index_items(Tid, Fd, IndexLocation + IndexSize, Eof);
+        {ok, IndexSize, #header{deleted=false,location=Location}=Header} ->
+            ets:insert(Tid, Header),
             load_index_items(Tid, Fd, IndexLocation + IndexSize, Location);
         eof ->
             {ok, Eof};
@@ -393,3 +394,28 @@ close_ets(nil) ->
     ok;
 close_ets(Tid) ->
     ets:delete(Tid).
+
+init_int(Path) ->
+    Tid = ets:new(index, [{keypos, #header.key}, set, private]),
+    case load_index(Tid, Path) of
+        {ok, IndexFd, LastLoc} ->
+            case load_main(Tid, Path, LastLoc) of
+                {ok, MainFd, Eof} ->
+                    {ok, #state{
+                       index_fd=IndexFd,
+                       main_fd=MainFd,
+                       path=Path,
+                       reset_pos=Eof,
+                       tid=Tid
+                      }};
+                Else ->
+                    Else
+            end;
+        Else ->
+            Else
+    end.
+
+
+compact_int(_State) ->
+    ok.
+
