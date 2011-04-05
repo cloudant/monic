@@ -37,7 +37,8 @@ all_test_() ->
       fun update_item/1,
       fun delete_item/1,
       fun compaction/1,
-      fun rebuild_index/1
+      fun rebuild_index/1,
+      fun repair_index/1
      ]}.
 
 add_single_hunk(Pid) ->
@@ -111,18 +112,51 @@ compaction(Pid) ->
      end}.
 
 rebuild_index(_) ->
-    {"index is rebuilt if lost",
+    {"index is rebuilt if lost completely",
      fun() ->
              {ok, Pid} = monic_file:open("bar.monic"),
              ok = monic_file:add(Pid, <<"foo">>, ?COOKIE, 3, {<<"123">>, done}),
              ok = monic_file:sync(Pid),
              {ok, OriginalIndex} = file:read_file("bar.monic.idx"),
              ok = monic_file:close(Pid),
+
+             %% delete the index.
              ok = file:delete("bar.monic.idx"),
+
+             %% verify the index is rebuilt.
              {ok, Pid1} = monic_file:open("bar.monic"),
              try
                  {ok, RebuiltIndex} = file:read_file("bar.monic.idx"),
-                 ?assertMatch(OriginalIndex, RebuiltIndex)
+                 ?assertEqual(OriginalIndex, RebuiltIndex)
+             after
+                 monic_file:close(Pid1),
+                 file:delete("bar.monic"),
+                 file:delete("bar.monic.idx")
+             end
+     end}.
+
+repair_index(_) ->
+    {"index is repaired if it exists but newer items exists in the main file",
+     fun() ->
+             {ok, Pid} = monic_file:open("bar.monic"),
+             ok = monic_file:add(Pid, <<"foo">>, ?COOKIE, 3, {<<"123">>, done}),
+             ok = monic_file:sync(Pid),
+             {ok, #file_info{size=Size}} = file:read_file_info("bar.monic.idx"),
+             ok = monic_file:add(Pid, <<"bar">>, ?COOKIE, 3, {<<"456">>, done}),
+             ok = monic_file:sync(Pid),
+             {ok, OriginalIndex} = file:read_file("bar.monic.idx"),
+             ok = monic_file:close(Pid),
+
+             %% truncate index by one whole record.
+             {ok, Fd} = file:open("bar.monic.idx", [write]),
+             {ok, _} = file:position(Fd, Size),
+             ok = file:close(Fd),
+
+             %% verify the entry is restored.
+             {ok, Pid1} = monic_file:open("bar.monic"),
+             try
+                 {ok, RebuiltIndex} = file:read_file("bar.monic.idx"),
+                 ?assertEqual(OriginalIndex, RebuiltIndex)
              after
                  monic_file:close(Pid1),
                  file:delete("bar.monic"),
