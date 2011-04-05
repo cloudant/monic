@@ -36,7 +36,8 @@ all_test_() ->
       fun underflow/1,
       fun update_item/1,
       fun delete_item/1,
-      fun compaction/1
+      fun compaction/1,
+      fun rebuild_index/1
      ]}.
 
 add_single_hunk(Pid) ->
@@ -109,6 +110,23 @@ compaction(Pid) ->
              ?assertMatch({ok, {<<"456">>, done}}, monic_file:read(Pid, <<"bar">>,  ?COOKIE))
      end}.
 
+rebuild_index(_) ->
+    {"index is rebuilt if lost",
+     fun() ->
+             {ok, Pid} = monic_file:open("bar.monic"),
+             ok = monic_file:add(Pid, <<"foo">>, ?COOKIE, 3, {<<"123">>, done}),
+             ok = monic_file:sync(Pid),
+             {ok, OriginalIndex} = file:read_file("bar.monic.idx"),
+             ok = monic_file:close(Pid),
+             ok = file:delete("bar.monic.idx"),
+             {ok, Pid1} = monic_file:open("bar.monic"),
+             try
+                 {ok, RebuiltIndex} = file:read_file("bar.monic.idx"),
+                 ?assertMatch(OriginalIndex, RebuiltIndex)
+             after
+                 monic_file:close(Pid1)
+             end
+     end}.
 
 streambody_to_binary(StreamBody) ->
     iolist_to_binary(streambody_to_iolist(StreamBody)).
