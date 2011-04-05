@@ -124,7 +124,9 @@ rebuild_index(_) ->
                  {ok, RebuiltIndex} = file:read_file("bar.monic.idx"),
                  ?assertMatch(OriginalIndex, RebuiltIndex)
              after
-                 monic_file:close(Pid1)
+                 monic_file:close(Pid1),
+                 file:delete("bar.monic"),
+                 file:delete("bar.monic.idx")
              end
      end}.
 

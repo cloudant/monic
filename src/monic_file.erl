@@ -268,12 +268,12 @@ load_index_items(Tid, Fd, IndexLocation, Eof) ->
             Else
     end.
 
-load_main(Tid, Path, Eof) ->
+load_main(Tid, Path, IndexFd, Eof) ->
     case file:open(Path, [binary, raw, read, append]) of
-        {ok, Fd} ->
-            case load_main_items(Tid, Fd, Eof) of
+        {ok, MainFd} ->
+            case load_main_items(Tid, MainFd, IndexFd, Eof) of
                 {ok, Eof1} ->
-                    {ok, Fd, Eof1};
+                    {ok, MainFd, Eof1};
                 Else ->
                     Else
             end;
@@ -281,22 +281,25 @@ load_main(Tid, Path, Eof) ->
             Else
     end.
 
-load_main_items(Tid, Fd, Location) ->
-    case monic_utils:pread_term(Fd, Location) of
-        {ok, HeaderSize, #header{deleted=true,key=Key}} ->
+load_main_items(Tid, MainFd, IndexFd, Location) ->
+    case monic_utils:pread_term(MainFd, Location) of
+        {ok, HeaderSize, #header{deleted=true,key=Key}=Header} ->
             ets:delete(Tid, Key),
-            load_main_items(Tid, Fd, Location + HeaderSize);
+            monic_utils:write_term(IndexFd, Header),
+            load_main_items(Tid, MainFd, IndexFd, Location + HeaderSize);
         {ok, HeaderSize, #header{deleted=false,size=Size}=Header} ->
-            ets:insert(Tid, Header#header{location=Location}),
-            case monic_utils:pread_term(Fd, Location + HeaderSize + Size) of
+            Header1 = Header#header{location=Location},
+            ets:insert(Tid, Header1),
+            monic_utils:write_term(IndexFd, Header1),
+            case monic_utils:pread_term(MainFd, Location + HeaderSize + Size) of
                 {ok, FooterSize, _} ->
-                    load_main_items(Tid, Fd, Location + HeaderSize + Size + FooterSize);
+                    load_main_items(Tid, MainFd, IndexFd, Location + HeaderSize + Size + FooterSize);
                 eof ->
-                    truncate(Fd, Location),
+                    truncate(MainFd, Location),
                     {ok, Location}
             end;
         eof ->
-            truncate(Fd, Location),
+            truncate(MainFd, Location),
             {ok, Location};
         Else ->
             Else
@@ -403,7 +406,7 @@ init_int(Path) ->
     Tid = ets:new(index, [{keypos, #header.key}, set, private]),
     case load_index(Tid, Path) of
         {ok, IndexFd, LastLoc} ->
-            case load_main(Tid, Path, LastLoc) of
+            case load_main(Tid, Path, IndexFd, LastLoc) of
                 {ok, MainFd, Eof} ->
                     {ok, #state{
                        index_fd=IndexFd,
@@ -419,7 +422,6 @@ init_int(Path) ->
             Else
     end.
 
-%% TODO write Path ++ ".compact.idx" as well!
 compact_int(#state{index_fd=IndexFd, main_fd=MainFd, path=Path, tid=Tid}) ->
     case file:open(Path ++ ".compact", [binary, raw, append]) of
         {ok, CompactFd} ->
@@ -439,8 +441,6 @@ compact_int(#state{index_fd=IndexFd, main_fd=MainFd, path=Path, tid=Tid}) ->
             Else
     end.
 
-%% TODO this method assumes all entries are in the index file which is not currently true.
-%% fix load_main_items to write missing entries to index_fd as it finds items.
 compact_int(IndexFd, MainFd, CompactFd, Tid, IndexLocation) ->
     case monic_utils:pread_term(IndexFd, IndexLocation) of
         {ok, IndexHeaderSize, #header{key=Key,location=OldLocation,size=Size}=Header} ->
@@ -492,4 +492,3 @@ copy_item(FromFd, ToFd, Location, Remaining) when Remaining > 0 ->
         Else ->
             Else
     end.
-
