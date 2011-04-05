@@ -1,4 +1,4 @@
 * efficient range requests
 * remember Content-Type
 
-* solid rename strategy for flip (lucene way?)
+* add UUID to file and index (delete index if not match and rebuild)
