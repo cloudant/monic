@@ -18,9 +18,6 @@
 
 -include("monic.hrl").
 
--define(ITEM_HEADER_MAGIC, 16#0f0f0f0f).
--define(ITEM_FOOTER_MAGIC, 16#7f7f7f7f).
-
 -define(MAX_TERM, (1 bsl 16)).
 
 path(ReqData, Context) ->
