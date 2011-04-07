@@ -58,11 +58,16 @@ write_term(Fd, Term) ->
 
 -spec pread_term(term(), integer()) -> {ok, integer(), term()} | eof | {error, term()}.
 pread_term(Fd, Location) ->
-    case file:pread(Fd, Location, ?MAX_TERM) of
-        {ok, <<Size:16/integer, Bin/binary>>} ->
-            {ok, Size + 2, binary_to_term(<<Bin:Size/binary>>)};
-        {ok, _} ->
-            eof;
+    case file:pread(Fd, Location, 2) of
+        {ok, <<Size:16/integer>>} ->
+            case file:pread(Fd, Location + 2, Size) of
+                {ok, <<Bin:Size/binary>>} ->
+                    {ok, Size + 2, binary_to_term(Bin)};
+                {ok, _} ->
+                    eof;
+                Else ->
+                    Else
+            end;
         Else ->
             Else
     end.
