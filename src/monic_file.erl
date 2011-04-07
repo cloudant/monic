@@ -192,7 +192,7 @@ handle_call({delete, Key, Cookie}, _From, #state{index_fd=IndexFd,main_fd=MainFd
                     case file:datasync(MainFd) of
                         ok ->
                             monic_utils:write_term(IndexFd, #header{key=Key,cookie=Cookie,deleted=true}),
-                            true = ?INDEX_MODULE:delete(Index, Key),
+                            ?INDEX_MODULE:delete(Index, Key),
                             {reply, ok, State#state{reset_pos=Pos+HeaderSize}};
                         Else ->
                             {reply, Else, abandon_write(State)}
@@ -382,10 +382,10 @@ stream_out(Pid, Location, Remaining) ->
 
 info_int(Index, Key, Cookie) ->
     case ?INDEX_MODULE:lookup(Index, Key) of
-        [#header{cookie=Cookie,location=Location,size=Size,last_modified=LastModified}] ->
+        {ok, #header{cookie=Cookie,location=Location,size=Size,last_modified=LastModified}} ->
             {ok, {Location, Size, LastModified}};
-        _ ->
-            {error, not_found}
+        Else ->
+            Else
     end.
 
 cleanup(#state{index=Index,index_fd=IndexFd,main_fd=MainFd}=State) ->
@@ -402,10 +402,10 @@ close_int(Fd) ->
 close_index(nil) ->
     ok;
 close_index(Index) ->
-    ?INDEX_MODULE:delete(Index).
+    ?INDEX_MODULE:stop(Index).
 
 init_int(Path) ->
-    Index = ?INDEX_MODULE:new(),
+    {ok, Index} = ?INDEX_MODULE:start_link(),
     case load_index(Index, Path) of
         {ok, IndexFd, LastLoc} ->
             case load_main(Index, Path, IndexFd, LastLoc) of
@@ -447,7 +447,7 @@ compact_int(IndexFd, MainFd, CompactFd, Index, IndexLocation) ->
     case monic_utils:pread_term(IndexFd, IndexLocation) of
         {ok, IndexHeaderSize, #header{key=Key,location=OldLocation,size=Size}=Header} ->
             case ?INDEX_MODULE:lookup(Index, Key) of
-                [_] ->
+                {ok, _} ->
                     case monic_utils:write_term(CompactFd, Header#header{location=nil}) of
                         {ok, CompactHeaderSize} ->
                             case copy_item(MainFd, CompactFd, OldLocation + CompactHeaderSize, Size) of
@@ -470,7 +470,7 @@ compact_int(IndexFd, MainFd, CompactFd, Index, IndexLocation) ->
                         Else ->
                             Else
                     end;
-                [] ->
+                _ ->
                     compact_int(IndexFd, MainFd, CompactFd, Index, IndexLocation + IndexHeaderSize)
             end;
         eof ->

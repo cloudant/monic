@@ -12,9 +12,9 @@
 %% License for the specific language governing permissions and limitations under
 %% the License.
 
-%% ETS-backed index. other implementations to follow.
+%% Dict-backed index.
 
--module(monic_index_ets).
+-module(monic_index_dict).
 -behavior(gen_server).
 -include("monic.hrl").
 
@@ -45,40 +45,37 @@ delete(Pid, Key) ->
 lookup(Pid, Key) ->
     gen_server:call(Pid, {lookup, Key}).
 
+%% gen_server functions.
+
 init(_) ->
-    {ok, ets:new(index, [{keypos, #header.key}, set, private])}.
+    {ok, dict:new()}.
 
-handle_call({insert, Header}, _From, Tid) ->
-    true = ets:insert(Tid, Header),
-    {reply, ok, Tid};
+handle_call({insert, #header{key=Key}=Header}, _From, Dict) ->
+    {reply, ok, dict:store(Key, Header, Dict)};
 
-handle_call({lookup, Key}, _From, Tid) ->
-    Reply = case ets:lookup(Tid, Key) of
-                [#header{}=Header] ->
-                    {ok, Header};
-                _ ->
+handle_call({lookup, Key}, _From, Dict) ->
+    Reply = case dict:find(Key, Dict) of
+                {ok, Value} ->
+                    {ok, Value};
+                error ->
                     {error, not_found}
             end,
-    {reply, Reply, Tid};
+    {reply, Reply, Dict};
 
-handle_call({delete, Key}, _From, Tid) ->
-    true = ets:delete(Tid, Key),
-    {reply, ok, Tid};
+handle_call({delete, Key}, _From, Dict) ->
+    {reply, ok, dict:erase(Key, Dict)};
 
-handle_call(stop, _From, Tid) ->
-    ets:delete(Tid),
-    {stop, normal, ok, nil}.
+handle_call(stop, _From, Dict) ->
+    {stop, normal, ok, Dict}.
 
-handle_cast(_Msg, Tid) ->
-    {noreply, Tid}.
+handle_cast(_Msg, Dict) ->
+    {noreply, Dict}.
 
-handle_info(_Info, Tid) ->
-    {noreply, Tid}.
+handle_info(_Info, Dict) ->
+    {noreply, Dict}.
 
-terminate(_Reason, nil) ->
-    ok;
-terminate(_Reason, Tid) ->
-    ets:delete(Tid).
+terminate(_Reason, _Dict) ->
+    ok.
 
-code_change(_OldVsn, Tid, _Extra) ->
-    {ok, Tid}.
+code_change(_OldVsn, Dict, _Extra) ->
+    {ok, Dict}.
