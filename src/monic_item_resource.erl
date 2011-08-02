@@ -26,8 +26,6 @@
 -include_lib("webmachine/include/webmachine.hrl").
 -include("monic.hrl").
 
--define(ITEM_MIME_TYPE, "application/octet-stream").
-
 init(ConfigProps) ->
     {ok, ConfigProps}.
 
@@ -35,11 +33,28 @@ allowed_methods(ReqData, Context) ->
     {['DELETE', 'GET', 'PUT'], ReqData, Context}.
 
 content_types_provided(ReqData, Context) ->
-    {[{?ITEM_MIME_TYPE, get_item}], ReqData, Context}.
+    Key = wrq:path_info(key, ReqData),
+    Cookie = list_to_integer(wrq:path_info(cookie, ReqData)),
+    ContentType1 = case monic_utils:open(ReqData, Context) of
+        {ok, Pid} ->
+            case monic_file:info(Pid, Key, Cookie) of
+                {ok, #header{content_type=ContentType}} ->
+                    ContentType;
+                {error, not_found} ->
+                    []
+            end;
+        _ ->
+            []
+    end,
+    {[{ContentType1, get_item}], ReqData, Context}.
 
 content_types_accepted(ReqData, Context) ->
-    ContentType = wrq:get_req_header("Content-Type", ReqData),
-    {[{ContentType, put_item}], ReqData, Context}.
+    CT = case wrq:get_req_header("content-type", ReqData) of
+             undefined -> "application/octet-stream";
+             X -> X
+         end,
+    {MT, _Params} = webmachine_util:media_type_to_detail(CT),
+    {[{MT, put_item}], ReqData, Context}.
 
 delete_resource(ReqData, Context) ->
     Key = wrq:path_info(key, ReqData),
@@ -112,8 +127,9 @@ put_item(ReqData, Context) ->
     case monic_utils:open(ReqData, Context) of
         {ok, Pid} ->
             Size = list_to_integer(wrq:get_req_header("Content-Length", ReqData)),
+            ContentType = wrq:get_req_header("Content-Type", ReqData),
             StreamBody = wrq:stream_req_body(ReqData, ?BUFFER_SIZE),
-            case monic_file:add(Pid, Key, Cookie, Size, StreamBody) of
+            case monic_file:add(Pid, Key, Cookie, ContentType, Size, StreamBody) of
                 ok ->
                     File = wrq:path_info(file, ReqData),
                     Location = io_lib:format("/~s/~B/~s",[File, Cookie, Key]),

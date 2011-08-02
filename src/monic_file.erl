@@ -18,7 +18,7 @@
 
 %% public API
 -export([create/1, delete/1, open/1, open_new/1, close/1, compact/1]).
--export([add/5, delete/3, info/3, read/3, sync/1]).
+-export([add/5, add/6, delete/3, info/3, read/3, sync/1]).
 
 %% gen_server API
 -export([init/1, terminate/2, code_change/3,handle_call/3, handle_cast/2, handle_info/2]).
@@ -82,7 +82,11 @@ delete(Path) ->
 
 -spec add(pid(), binary(), integer(), integer(), streambody()) -> ok | {error, term()}.
 add(Pid, Key, Cookie, Size, StreamBody) ->
-    case gen_server:call(Pid, {start_writing, Key, Cookie, Size}, infinity) of
+    add(Pid, Key, Cookie, nil, Size, StreamBody).
+
+-spec add(pid(), binary(), integer(), nil | binary(), integer(), streambody()) -> ok | {error, term()}.
+add(Pid, Key, Cookie, ContentType, Size, StreamBody) ->
+    case gen_server:call(Pid, {start_writing, Key, Cookie, ContentType, Size}, infinity) of
         ok ->
             stream_in(Pid, StreamBody);
         Else ->
@@ -121,11 +125,11 @@ init(Path) ->
             {stop, Else}
     end.
 
-handle_call({start_writing, Key, Cookie, Size}, {Pid,_}, #state{writer=nil}=State) ->
-    {Reply, State1} = start_write(Key, Cookie, Size, Pid, State),
+handle_call({start_writing, Key, Cookie, ContentType, Size}, {Pid,_}, #state{writer=nil}=State) ->
+    {Reply, State1} = start_write(Key, Cookie, ContentType, Size, Pid, State),
     {reply, Reply, State1};
-handle_call({start_writing, Key, Cookie, Size}, From, #state{pending=Pending}=State) ->
-    {noreply, State#state{pending=queue:in({Key, Cookie, Size, From}, Pending)}};
+handle_call({start_writing, Key, Cookie, ContentType, Size}, From, #state{pending=Pending}=State) ->
+    {noreply, State#state{pending=queue:in({Key, Cookie, ContentType, Size, From}, Pending)}};
 
 handle_call({write, {Bin, Next}}, {Pid, _}, #state{main_fd=Fd, next_header=Header,
                                                    remaining=Remaining, written=Written,
@@ -300,7 +304,7 @@ load_main_items(Index, MainFd, IndexFd, Location) ->
             Else
     end.
 
-start_write(Key, Cookie, Size, WriterPid,
+start_write(Key, Cookie, ContentType, Size, WriterPid,
             #state{main_fd=MainFd,reset_pos=Pos,writer=nil}=State) ->
     LastModified = erlang:universaltime(),
     Header = #header{
@@ -308,6 +312,7 @@ start_write(Key, Cookie, Size, WriterPid,
       key=Key,
       location=Pos,
       size=Size,
+      content_type=ContentType,
       last_modified=LastModified
      },
     case monic_utils:write_term(MainFd, Header#header{location=nil}) of
@@ -340,8 +345,9 @@ maybe_start_pending_write(#state{pending=Pending}=State) ->
     case queue:out(Pending) of
         {empty, Pending1} ->
             State#state{pending=Pending1};
-        {{value, {Key, Cookie, Size, {Pid,_}=From}}, Pending1} ->
-            {Reply, State1} = start_write(Key, Cookie, Size, Pid, State#state{pending=Pending1}),
+        {{value, {Key, Cookie, ContentType, Size, {Pid,_}=From}}, Pending1} ->
+            {Reply, State1} = start_write(Key, Cookie, ContentType, Size, Pid,
+                                          State#state{pending=Pending1}),
             gen_server:reply(From, Reply),
             State1
     end.

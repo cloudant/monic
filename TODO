@@ -1,4 +1,3 @@
 * efficient range requests
-* remember Content-Type
 
 * add UUID to file and index (delete index if not match and rebuild)

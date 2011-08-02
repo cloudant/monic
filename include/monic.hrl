@@ -5,6 +5,7 @@
           cookie :: integer(),
           location :: integer(),
           size :: integer(),
+          content_type = nil :: nil | binary(),
           last_modified,
           deleted=false :: boolean()
          }).
