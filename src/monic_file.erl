@@ -84,8 +84,8 @@ delete(Path) ->
 -spec add(pid(), binary(), integer(), integer(), streambody()) -> ok | {error, term()}.
 add(Pid, Key, Cookie, Size, StreamBody) ->
     case gen_server:call(Pid, {start_writing, Key, Cookie, Size}, infinity) of
-        {ok, Ref} ->
-            stream_in(Pid, Ref, StreamBody);
+        ok ->
+            stream_in(Pid, StreamBody);
         Else ->
             Else
     end.
@@ -122,8 +122,8 @@ init(Path) ->
             {stop, Else}
     end.
 
-handle_call({start_writing, Key, Cookie, Size}, _From, #state{writer=nil}=State) ->
-    {Reply, State1} = start_write(Key, Cookie, Size, State),
+handle_call({start_writing, Key, Cookie, Size}, {Pid,_}, #state{writer=nil}=State) ->
+    {Reply, State1} = start_write(Key, Cookie, Size, Pid, State),
     {reply, Reply, State1};
 handle_call({start_writing, Key, Cookie, Size}, From, #state{last_write=LastWrite, pending=Pending}=State) ->
     State1 = State#state{pending=queue:in({Key, Cookie, Size, From}, Pending)},
@@ -134,9 +134,9 @@ handle_call({start_writing, Key, Cookie, Size}, From, #state{last_write=LastWrit
             {noreply, State1}
     end;
 
-handle_call({write, Ref, {Bin, Next}}, _From, #state{main_fd=Fd, next_header=Header,
-                                                     remaining=Remaining, written=Written,
-                                                     reset_pos=Pos, sha=Sha, writer=Ref}=State) ->
+handle_call({write, {Bin, Next}}, {Pid, _}, #state{main_fd=Fd, next_header=Header,
+                                                   remaining=Remaining, written=Written,
+                                                   reset_pos=Pos, sha=Sha, writer=Pid}=State) ->
     Size = iolist_size(Bin),
     Write = case {Next, Remaining - Size} of
                 {_, Remaining1} when Remaining1 < 0 ->
@@ -169,7 +169,7 @@ handle_call({write, Ref, {Bin, Next}}, _From, #state{main_fd=Fd, next_header=Hea
         {_, Else} ->
             {reply, Else, abandon_write(State)}
     end;
-handle_call({write, _Ref, _StreamBody}, _From, State) ->
+handle_call({write, _StreamBody}, _From, State) ->
     {reply, {error, not_writing}, State};
 
 handle_call({read, Key, Cookie}, _From, #state{main_fd=Fd, index=Index}=State) ->
@@ -307,8 +307,8 @@ load_main_items(Index, MainFd, IndexFd, Location) ->
             Else
     end.
 
-start_write(Key, Cookie, Size, #state{main_fd=MainFd,reset_pos=Pos,writer=nil}=State) ->
-    Ref = make_ref(),
+start_write(Key, Cookie, Size, WriterPid,
+            #state{main_fd=MainFd,reset_pos=Pos,writer=nil}=State) ->
     LastModified = erlang:universaltime(),
     Header = #header{
       cookie=Cookie,
@@ -319,13 +319,13 @@ start_write(Key, Cookie, Size, #state{main_fd=MainFd,reset_pos=Pos,writer=nil}=S
      },
     case monic_utils:write_term(MainFd, Header#header{location=nil}) of
         {ok, HeaderSize} ->
-            {{ok, Ref}, State#state{
-                          last_write=now(),
-                          remaining=Size,
-                          sha=crypto:sha_init(),
-                          next_header=Header,
-                          writer=Ref,
-                          written=HeaderSize}};
+            {ok, State#state{
+                   last_write=now(),
+                   remaining=Size,
+                   sha=crypto:sha_init(),
+                   next_header=Header,
+                   writer=WriterPid,
+                   written=HeaderSize}};
         Else ->
             {Else, abandon_write(State)}
     end.
@@ -341,8 +341,8 @@ maybe_start_pending_write(#state{pending=Pending}=State) ->
     case queue:out(Pending) of
         {empty, Pending1} ->
             State#state{pending=Pending1};
-        {{value, {Key, Cookie, Size, From}}, Pending1} ->
-            {Reply, State1} = start_write(Key, Cookie, Size, State#state{pending=Pending1}),
+        {{value, {Key, Cookie, Size, {Pid,_}=From}}, Pending1} ->
+            {Reply, State1} = start_write(Key, Cookie, Size, Pid, State#state{pending=Pending1}),
             gen_server:reply(From, Reply),
             State1
     end.
@@ -355,12 +355,12 @@ truncate(Fd, Pos) ->
             Else
     end.
 
-stream_in(Pid, Ref, StreamBody) ->
-    case gen_server:call(Pid, {write, Ref, StreamBody}, infinity) of
+stream_in(Pid, StreamBody) ->
+    case gen_server:call(Pid, {write, StreamBody}, infinity) of
         {ok, Cookie} ->
             {ok, Cookie};
         {continue, Next} ->
-            stream_in(Pid, Ref, Next());
+            stream_in(Pid, Next());
         Else ->
             Else
     end.
