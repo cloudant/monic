@@ -28,7 +28,6 @@
 -record(state, {
           index,
           index_fd=nil,
-          last_write=nil,
           main_fd=nil,
           next_header,
           path,
@@ -37,10 +36,10 @@
           reset_pos,
           sha,
           written,
-          writer=nil
+          writer=nil,
+          monitor=nil
          }).
 
--define(IDLE_WRITER_TIMEOUT, 5000).
 -type streambody() :: {binary(), done | fun(() -> streambody())}.
 
 %% public functions
@@ -125,14 +124,8 @@ init(Path) ->
 handle_call({start_writing, Key, Cookie, Size}, {Pid,_}, #state{writer=nil}=State) ->
     {Reply, State1} = start_write(Key, Cookie, Size, Pid, State),
     {reply, Reply, State1};
-handle_call({start_writing, Key, Cookie, Size}, From, #state{last_write=LastWrite, pending=Pending}=State) ->
-    State1 = State#state{pending=queue:in({Key, Cookie, Size, From}, Pending)},
-    case timer:now_diff(now(), LastWrite) > ?IDLE_WRITER_TIMEOUT of
-        true ->
-            {noreply, abandon_write(State1)};
-        false ->
-            {noreply, State1}
-    end;
+handle_call({start_writing, Key, Cookie, Size}, From, #state{pending=Pending}=State) ->
+    {noreply, State#state{pending=queue:in({Key, Cookie, Size, From}, Pending)}};
 
 handle_call({write, {Bin, Next}}, {Pid, _}, #state{main_fd=Fd, next_header=Header,
                                                    remaining=Remaining, written=Written,
@@ -164,7 +157,7 @@ handle_call({write, {Bin, Next}}, {Pid, _}, #state{main_fd=Fd, next_header=Heade
                     {reply, Else, abandon_write(State)}
             end;
         {_, ok} ->
-            {reply, {continue, Next}, State#state{last_write=now(), remaining=Remaining-Size,
+            {reply, {continue, Next}, State#state{remaining=Remaining-Size,
                                                   written=Written+Size, sha=Sha1}};
         {_, Else} ->
             {reply, Else, abandon_write(State)}
@@ -229,8 +222,8 @@ handle_call(sync, _From, #state{index_fd=Fd}=State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_info(_Info, State) ->
-    {noreply, State}.
+handle_info({'DOWN', Mon, _, _, _}, #state{monitor=Mon}=State) ->
+    {noreply, abandon_write(State)}.
 
 terminate(_Reason, State) ->
     cleanup(State).
@@ -320,22 +313,28 @@ start_write(Key, Cookie, Size, WriterPid,
     case monic_utils:write_term(MainFd, Header#header{location=nil}) of
         {ok, HeaderSize} ->
             {ok, State#state{
-                   last_write=now(),
                    remaining=Size,
                    sha=crypto:sha_init(),
                    next_header=Header,
                    writer=WriterPid,
+                   monitor=monitor(process, WriterPid),
                    written=HeaderSize}};
         Else ->
             {Else, abandon_write(State)}
     end.
 
 finish_write(Eof, State) ->
-    maybe_start_pending_write(State#state{last_write=nil, next_header=nil, reset_pos=Eof, writer=nil}).
+    maybe_start_pending_write(
+      clear_writer(State#state{next_header=nil,
+                               reset_pos=Eof})).
 
 abandon_write(#state{main_fd=Fd, reset_pos=Pos}=State) ->
     truncate(Fd, Pos),
-    maybe_start_pending_write(State#state{writer=nil}).
+    maybe_start_pending_write(clear_writer(State)).
+
+clear_writer(State) ->
+    demonitor(State#state.monitor),
+    State#state{writer=nil,monitor=nil}.
 
 maybe_start_pending_write(#state{pending=Pending}=State) ->
     case queue:out(Pending) of
