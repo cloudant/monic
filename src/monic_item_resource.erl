@@ -38,7 +38,8 @@ content_types_provided(ReqData, Context) ->
     {[{?ITEM_MIME_TYPE, get_item}], ReqData, Context}.
 
 content_types_accepted(ReqData, Context) ->
-    {[{?ITEM_MIME_TYPE, put_item}], ReqData, Context}.
+    ContentType = wrq:get_req_header("Content-Type", ReqData),
+    {[{ContentType, put_item}], ReqData, Context}.
 
 delete_resource(ReqData, Context) ->
     Key = wrq:path_info(key, ReqData),
