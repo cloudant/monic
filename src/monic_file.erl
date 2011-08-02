@@ -405,91 +405,45 @@ close_index(Index) ->
 
 init_int(Path) ->
     {ok, Index} = ?INDEX_MODULE:start_link(),
-    case load_index(Index, Path) of
-        {ok, IndexFd, LastLoc} ->
-            case load_main(Index, Path, IndexFd, LastLoc) of
-                {ok, MainFd, Eof} ->
-                    {ok, #state{
-                       index_fd=IndexFd,
-                       main_fd=MainFd,
-                       path=Path,
-                       reset_pos=Eof,
-                       index=Index
-                      }};
-                Else ->
-                    Else
-            end;
-        Else ->
-            Else
-    end.
+    {ok, IndexFd, LastLoc} = load_index(Index, Path),
+    {ok, MainFd, Eof} = load_main(Index, Path, IndexFd, LastLoc),
+    {ok, #state{
+       index_fd=IndexFd,
+       main_fd=MainFd,
+       path=Path,
+       reset_pos=Eof,
+       index=Index
+      }}.
 
 compact_int(#state{index_fd=IndexFd, main_fd=MainFd, path=Path, index=Index}) ->
-    case file:open(Path ++ ".compact", [binary, raw, append]) of
-        {ok, CompactFd} ->
-            case compact_int(IndexFd, MainFd, CompactFd, Index, 0) of
-                ok ->
-                    case file:datasync(CompactFd) of
-                        ok ->
-                            file:delete(Path ++ ".idx"), %% TODO file:rename(Path ++ ".compact.idx", Path ++ ".idx")
-                            file:rename(Path ++ ".compact", Path);
-                        Else ->
-                            Else
-                    end;
-                Else ->
-                    Else
-            end;
-        Else ->
-            Else
-    end.
+    {ok, CompactFd} = file:open(Path ++ ".compact", [binary, raw, append]),
+    ok = compact_int(IndexFd, MainFd, CompactFd, Index, 0),
+    ok = file:datasync(CompactFd),
+    file:delete(Path ++ ".idx"), %% TODO file:rename(Path ++ ".compact.idx", Path ++ ".idx")
+    file:rename(Path ++ ".compact", Path).
 
 compact_int(IndexFd, MainFd, CompactFd, Index, IndexLocation) ->
     case monic_utils:pread_term(IndexFd, IndexLocation) of
         {ok, IndexHeaderSize, #header{key=Key,location=OldLocation,size=Size}=Header} ->
             case ?INDEX_MODULE:lookup(Index, Key) of
                 {ok, _} ->
-                    case monic_utils:write_term(CompactFd, Header#header{location=nil}) of
-                        {ok, CompactHeaderSize} ->
-                            case copy_item(MainFd, CompactFd, OldLocation + CompactHeaderSize, Size) of
-                                ok ->
-                                    case monic_utils:pread_term(MainFd, OldLocation + CompactHeaderSize + Size) of
-                                        {ok, _, #footer{}=Footer} ->
-                                            case monic_utils:write_term(CompactFd, Footer) of
-                                                {ok, _} ->
-                                                    compact_int(IndexFd, MainFd, CompactFd, Index,
-                                                                IndexLocation + IndexHeaderSize);
-                                                Else ->
-                                                    Else
-                                            end;
-                                        Else ->
-                                            Else
-                                    end;
-                                Else ->
-                                    Else
-                            end;
-                        Else ->
-                            Else
-                    end;
+                    {ok, CompactHeaderSize} = monic_utils:write_term(CompactFd, Header#header{location=nil}),
+                    ok = copy_item(MainFd, CompactFd, OldLocation + CompactHeaderSize, Size),
+                    {ok, _, #footer{}=Footer} =  monic_utils:pread_term(MainFd, OldLocation + CompactHeaderSize + Size),
+                    {ok, _} = monic_utils:write_term(CompactFd, Footer),
+                    compact_int(IndexFd, MainFd, CompactFd, Index,
+                                IndexLocation + IndexHeaderSize);
                 _ ->
                     compact_int(IndexFd, MainFd, CompactFd, Index, IndexLocation + IndexHeaderSize)
             end;
         eof ->
-            ok;
-        Else ->
-            Else
+            ok
     end.
 
 copy_item(_FromFd, _ToFd, _Location, 0) ->
     ok;
 copy_item(FromFd, ToFd, Location, Remaining) when Remaining > 0 ->
-    case file:pread(FromFd, Location, min(Remaining, ?BUFFER_SIZE)) of
-        {ok, Bin} ->
-            Size = iolist_size(Bin),
-            case file:write(ToFd, Bin) of
-                ok ->
-                    copy_item(FromFd, ToFd, Location + Size, Remaining - Size);
-                Else ->
-                    Else
-            end;
-        Else ->
-            Else
-    end.
+    {ok, Bin} = file:pread(FromFd, Location, min(Remaining, ?BUFFER_SIZE)),
+    Size = iolist_size(Bin),
+    ok = file:write(ToFd, Bin),
+    copy_item(FromFd, ToFd, Location + Size, Remaining - Size).
