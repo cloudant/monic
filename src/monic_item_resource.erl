@@ -113,31 +113,23 @@ valid_entity_length(ReqData, Context) ->
 get_item(ReqData, Context) ->
     Key = wrq:path_info(key, ReqData),
     Cookie = list_to_integer(wrq:path_info(cookie, ReqData)),
-    case monic_utils:open(ReqData, Context) of
-        {ok, Pid} ->
-            {ok, StreamBody} = monic_file:read(Pid, Key, Cookie),
-            {{stream, StreamBody}, ReqData, Context};
-        _ ->
-            {<<>>, ReqData, Context}
-    end.
+    {ok, Pid} = monic_utils:open(ReqData, Context),
+    {ok, StreamBody} = monic_file:read(Pid, Key, Cookie),
+    {{stream, StreamBody}, ReqData, Context}.
 
 put_item(ReqData, Context) ->
     Key = wrq:path_info(key, ReqData),
     Cookie = list_to_integer(wrq:path_info(cookie, ReqData)),
-    case monic_utils:open(ReqData, Context) of
-        {ok, Pid} ->
-            Size = list_to_integer(wrq:get_req_header("Content-Length", ReqData)),
-            ContentType = wrq:get_req_header("Content-Type", ReqData),
-            StreamBody = wrq:stream_req_body(ReqData, ?BUFFER_SIZE),
-            case monic_file:add(Pid, Key, Cookie, ContentType, Size, StreamBody) of
-                ok ->
-                    File = wrq:path_info(file, ReqData),
-                    Location = io_lib:format("/~s/~B/~s",[File, Cookie, Key]),
-                    ReqData1 = wrq:set_resp_header("Location", Location, ReqData),
-                    {true, ReqData1, Context};
-                _ ->
-                    {false, ReqData, Context}
-            end;
+    {ok, Pid} = monic_utils:open(ReqData, Context),
+    Size = list_to_integer(wrq:get_req_header("Content-Length", ReqData)),
+    ContentType = wrq:get_req_header("Content-Type", ReqData),
+    StreamBody = wrq:stream_req_body(ReqData, ?BUFFER_SIZE),
+    case monic_file:add(Pid, Key, Cookie, ContentType, Size, StreamBody) of
+        ok ->
+            File = wrq:path_info(file, ReqData),
+            Location = io_lib:format("/~s/~B/~s",[File, Cookie, Key]),
+            ReqData1 = wrq:set_resp_header("Location", Location, ReqData),
+            {true, ReqData1, Context};
         _ ->
             {false, ReqData, Context}
     end.

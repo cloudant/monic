@@ -411,19 +411,15 @@ close_index(Index) ->
 
 init_int(Path) ->
     {ok, Index} = ?INDEX_MODULE:start_link(),
-    case load_index(Index, Path) of
-        {ok, IndexFd, LastLoc} ->
-            {ok, MainFd, Eof} = load_main(Index, Path, IndexFd, LastLoc),
-            {ok, #state{
-               index_fd=IndexFd,
-               main_fd=MainFd,
-               path=Path,
-               reset_pos=Eof,
-               index=Index
-              }};
-        Else ->
-            Else
-    end.
+    {ok, IndexFd, LastLoc} = load_index(Index, Path),
+    {ok, MainFd, Eof} = load_main(Index, Path, IndexFd, LastLoc),
+    {ok, #state{
+       index_fd=IndexFd,
+       main_fd=MainFd,
+       path=Path,
+       reset_pos=Eof,
+       index=Index
+      }}.
 
 compact_int(#state{index_fd=IndexFd, main_fd=MainFd, path=Path, index=Index}) ->
     {ok, CompactFd} = file:open(Path ++ ".compact", [binary, raw, append]),
