@@ -167,7 +167,7 @@ handle_call({write, _StreamBody}, _From, State) ->
 
 handle_call({read, Key, Cookie}, _From, #state{main_fd=Fd, index=Index}=State) ->
     case info_int(Index, Key, Cookie) of
-        {ok, {Location, Size, _LastModified}} ->
+        {ok, #header{location=Location,size=Size}} ->
             {ok, HeaderSize, _} = monic_utils:pread_term(Fd, Location),
             Self = self(),
             {reply, {ok, fun() -> stream_out(Self, Location + HeaderSize, Size) end}, State};
@@ -381,8 +381,8 @@ stream_out(Pid, Location, Remaining) ->
 
 info_int(Index, Key, Cookie) ->
     case ?INDEX_MODULE:lookup(Index, Key) of
-        {ok, #header{cookie=Cookie,location=Location,size=Size,last_modified=LastModified}} ->
-            {ok, {Location, Size, LastModified}};
+        {ok, #header{cookie=Cookie}=Header} ->
+            {ok, Header};
         Else ->
             Else
     end.

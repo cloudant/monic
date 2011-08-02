@@ -57,7 +57,7 @@ last_modified(ReqData, Context) ->
     LastModified1 = case monic_utils:open(ReqData, Context) of
         {ok, Pid} ->
             case monic_file:info(Pid, Key, Cookie) of
-                {ok, {_, _, LastModified}} ->
+                {ok, #header{last_modified=LastModified}} ->
                     LastModified;
                 {error, not_found} ->
                     undefined
